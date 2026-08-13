@@ -10,23 +10,6 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 1) {
 
 $msg = "";
 
-// ==========================================
-// AUTOMATIC DB SCHEMA UPDATES FOR NEW DUTY SYSTEM
-// ==========================================
-$pdo->exec("CREATE TABLE IF NOT EXISTS DistrictLandmarks (
-    landmark_id INT PRIMARY KEY AUTO_INCREMENT,
-    district VARCHAR(50) NOT NULL,
-    landmark_name VARCHAR(100) NOT NULL
-)");
-
-// Upgrade DutySchedules table safely to support Weekly Time Ranges & Landmarks
-try {
-    $pdo->exec("ALTER TABLE DutySchedules ADD COLUMN IF NOT EXISTS landmark_id INT");
-    $pdo->exec("ALTER TABLE DutySchedules ADD COLUMN IF NOT EXISTS day_of_week VARCHAR(15)");
-    $pdo->exec("ALTER TABLE DutySchedules ADD COLUMN IF NOT EXISTS start_time TIME");
-    $pdo->exec("ALTER TABLE DutySchedules ADD COLUMN IF NOT EXISTS end_time TIME");
-} catch (PDOException $e) { /* Ignore if already exists */ }
-
 $districts = ["Colombo", "Gampaha", "Kandy", "Kurunegala", "Jaffna", "Kilinochchi", "Vavuniya", "Anuradhapura", "Galle", "Matara"];
 $days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -36,16 +19,16 @@ $days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturd
 
 // --- NEW/MODIFY DUTY ROSTER SCHEDULING ---
 if (isset($_POST['save_duty'])) {
-    $schedule_id = $_POST['schedule_id']; // Will be empty if adding new, filled if modifying
+    $schedule_id = $_POST['schedule_id']; 
     $officer_id = $_POST['officer_id'];
     $landmark_id = $_POST['landmark_id'];
     $day = $_POST['day_of_week'];
     $start = $_POST['start_time'];
     $end = $_POST['end_time'];
     
-    // 1. Strict Validation: District Match
-    $off_dist = $pdo->query("SELECT officer_district FROM Users WHERE user_id = " . intval($officer_id))->fetchColumn();
-    $land_dist = $pdo->query("SELECT district FROM DistrictLandmarks WHERE landmark_id = " . intval($landmark_id))->fetchColumn();
+    // 1. Strict Validation: District Match (Updated schemas)
+    $off_dist = $pdo->query("SELECT district FROM Users WHERE user_id = " . intval($officer_id))->fetchColumn();
+    $land_dist = $pdo->query("SELECT district FROM Landmarks WHERE landmark_id = " . intval($landmark_id))->fetchColumn();
     
     if ($off_dist !== $land_dist) {
         $msg = "<div class='alert'>ASSIGNMENT BLOCKED: Officer belongs to <strong>$off_dist</strong> district. You cannot assign them to a place in <strong>$land_dist</strong>.</div>";
@@ -53,13 +36,11 @@ if (isset($_POST['save_duty'])) {
         $msg = "<div class='alert'>INVALID TIME: Shift end time must be after the start time.</div>";
     } else {
         // 2. Strict Validation: Overlap Detection
-        // Prevent assigning ANY officer to this exact place, on this day, overlapping this time range.
         $overlap_query = "SELECT u.name FROM DutySchedules ds JOIN Users u ON ds.user_id = u.user_id 
                           WHERE ds.landmark_id = ? AND ds.day_of_week = ? 
                           AND ds.start_time < ? AND ds.end_time > ?";
         $params = [$landmark_id, $day, $end, $start];
         
-        // If modifying, exclude the current schedule from the overlap check
         if (!empty($schedule_id)) {
             $overlap_query .= " AND ds.schedule_id != ?";
             $params[] = $schedule_id;
@@ -104,19 +85,18 @@ if (isset($_POST['reject_officer'])) {
 
 // Landmark Management...
 if (isset($_POST['add_landmark'])) {
-    $pdo->prepare("INSERT INTO DistrictLandmarks (district, landmark_name) VALUES (?, ?)")->execute([$_POST['district'], trim($_POST['landmark_name'])]);
+    $pdo->prepare("INSERT INTO Landmarks (district, landmark_name) VALUES (?, ?)")->execute([$_POST['district'], trim($_POST['landmark_name'])]);
     $msg = "<div class='alert'>Landmark added.</div>";
 }
 if (isset($_POST['delete_landmark'])) {
-    // Delete dependent duty schedules first to prevent orphan records
     $pdo->prepare("DELETE FROM DutySchedules WHERE landmark_id = ?")->execute([$_POST['landmark_id']]);
-    $pdo->prepare("DELETE FROM DistrictLandmarks WHERE landmark_id = ?")->execute([$_POST['landmark_id']]);
+    $pdo->prepare("DELETE FROM Landmarks WHERE landmark_id = ?")->execute([$_POST['landmark_id']]);
     $msg = "<div class='alert'>Landmark removed.</div>";
 }
 
 // Standard Deletions
 if (isset($_POST['delete_report'])) {
-    $pdo->prepare("DELETE FROM IncidentReports WHERE report_id = ?")->execute([$_POST['report_id']]);
+    $pdo->prepare("DELETE FROM Reports WHERE report_id = ?")->execute([$_POST['report_id']]);
     $msg = "<div class='alert'>False report purged.</div>";
 }
 if (isset($_POST['admin_delete_vehicle'])) {
@@ -125,11 +105,14 @@ if (isset($_POST['admin_delete_vehicle'])) {
 }
 if (isset($_POST['delete_user'])) {
     $t_id = $_POST['target_user_id'];
-    $pdo->exec("DELETE FROM DutySchedules WHERE user_id = $t_id");
-    $pdo->exec("DELETE FROM IncidentReports WHERE reporter_id = $t_id");
-    $pdo->exec("DELETE FROM Vehicles WHERE user_id = $t_id"); 
-    $pdo->exec("DELETE FROM Fines WHERE issuing_officer_id = $t_id"); 
+    
+    // Security Patch: Used Prepared Statements for deletions
+    $pdo->prepare("DELETE FROM DutySchedules WHERE user_id = ?")->execute([$t_id]);
+    $pdo->prepare("DELETE FROM Reports WHERE reporter_id = ?")->execute([$t_id]);
+    $pdo->prepare("DELETE FROM Vehicles WHERE user_id = ?")->execute([$t_id]); 
+    $pdo->prepare("DELETE FROM Fines WHERE issuing_officer_id = ?")->execute([$t_id]); 
     $pdo->prepare("DELETE FROM Users WHERE user_id = ?")->execute([$t_id]);
+    
     $msg = "<div class='alert'>Account deleted.</div>";
 }
 
@@ -138,27 +121,25 @@ if (isset($_POST['delete_user'])) {
 // ==========================================
 
 $pending_officers = $pdo->query("SELECT * FROM Users WHERE role_id = 2 AND is_approved = 0")->fetchAll();
-$active_officers = $pdo->query("SELECT user_id, name, officer_district FROM Users WHERE role_id = 2 AND is_approved = 1 ORDER BY officer_district ASC, name ASC")->fetchAll();
-$all_landmarks = $pdo->query("SELECT * FROM DistrictLandmarks ORDER BY district ASC, landmark_name ASC")->fetchAll();
+$active_officers = $pdo->query("SELECT user_id, name, district FROM Users WHERE role_id = 2 AND is_approved = 1 ORDER BY district ASC, name ASC")->fetchAll();
+$all_landmarks = $pdo->query("SELECT * FROM Landmarks ORDER BY district ASC, landmark_name ASC")->fetchAll();
 
 // Fetch Full Roster (Officers assigned to landmarks)
 $schedules = $pdo->query("
-    SELECT ds.*, u.name AS officer_name, u.officer_district, l.landmark_name, l.district AS landmark_district 
+    SELECT ds.*, u.name AS officer_name, u.district, l.landmark_name, l.district AS landmark_district 
     FROM DutySchedules ds 
     JOIN Users u ON ds.user_id = u.user_id 
-    JOIN DistrictLandmarks l ON ds.landmark_id = l.landmark_id
+    JOIN Landmarks l ON ds.landmark_id = l.landmark_id
     ORDER BY FIELD(ds.day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'), ds.start_time ASC
 ")->fetchAll();
 
-$reports = $pdo->query("SELECT r.*, u.name AS reporter_name, s.sector_name FROM IncidentReports r LEFT JOIN Users u ON r.reporter_id = u.user_id LEFT JOIN Sectors s ON r.sector_id = s.sector_id ORDER BY r.timestamp DESC")->fetchAll();
-$all_users = $pdo->query("SELECT user_id, name, email, role_id, is_approved, officer_district FROM Users WHERE role_id IN (2, 3) ORDER BY role_id ASC, name ASC")->fetchAll();
+$all_users = $pdo->query("SELECT user_id, name, email, role_id, is_approved, district FROM Users WHERE role_id IN (2, 3) ORDER BY role_id ASC, name ASC")->fetchAll();
 $all_vehicles = $pdo->query("SELECT v.license_plate, v.vehicle_model, v.registered_date, u.name AS owner_name, u.email FROM Vehicles v JOIN Users u ON v.user_id = u.user_id ORDER BY v.registered_date DESC")->fetchAll();
-$sectors = $pdo->query("SELECT sector_id, sector_name, city_zone, district FROM Sectors ORDER BY district ASC, sector_name ASC")->fetchAll();
 
 // Prepare JSON for Javascript Dynamic Filtering
 $officer_data = [];
 foreach($active_officers as $o) {
-    $officer_data[$o['user_id']] = $o['officer_district'];
+    $officer_data[$o['user_id']] = $o['district'];
 }
 $json_officers = json_encode($officer_data);
 
@@ -212,7 +193,7 @@ $json_landmarks = json_encode($landmark_data);
             <tr>
                 <td><strong><?php echo htmlspecialchars($po['name']); ?></strong></td>
                 <td><?php echo htmlspecialchars($po['email']); ?></td>
-                <td>[<?php echo htmlspecialchars($po['officer_district'] ?? 'N/A'); ?>]</td>
+                <td>[<?php echo htmlspecialchars($po['district'] ?? 'N/A'); ?>]</td>
                 <td>
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="target_id" value="<?php echo $po['user_id']; ?>">
@@ -229,7 +210,6 @@ $json_landmarks = json_encode($landmark_data);
     </div>
     <?php endif; ?>
 
-    <!-- NEW DUTY SCHEDULING INTERFACE -->
     <div class="panel">
         <h3>Official Duty Roster Management</h3>
         <p>Schedule officers for weekly patrol slots at registered district landmarks. Overlapping shifts for the same place are physically blocked by the system.</p>
@@ -245,7 +225,7 @@ $json_landmarks = json_encode($landmark_data);
                         <option value="">-- Choose Officer --</option>
                         <?php foreach($active_officers as $off): ?>
                             <option value="<?php echo $off['user_id']; ?>">
-                                <?php echo htmlspecialchars($off['name']); ?> [<?php echo htmlspecialchars($off['officer_district']); ?>]
+                                <?php echo htmlspecialchars($off['name']); ?> [<?php echo htmlspecialchars($off['district']); ?>]
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -253,7 +233,6 @@ $json_landmarks = json_encode($landmark_data);
                     <label>Assigned Place / Landmark</label>
                     <select name="landmark_id" id="sel_landmark" required>
                         <option value="">-- Select Officer First --</option>
-                        <!-- Populated by JavaScript -->
                     </select>
                     
                     <label>Day of the Week</label>
@@ -288,7 +267,7 @@ $json_landmarks = json_encode($landmark_data);
                         <tr>
                             <td>
                                 <strong><?php echo htmlspecialchars($s['officer_name']); ?></strong><br>
-                                <small><?php echo htmlspecialchars($s['officer_district']); ?> Dist.</small>
+                                <small><?php echo htmlspecialchars($s['district']); ?> Dist.</small>
                             </td>
                             <td><strong><?php echo htmlspecialchars($s['landmark_name']); ?></strong></td>
                             <td>
@@ -296,7 +275,6 @@ $json_landmarks = json_encode($landmark_data);
                                 <small><?php echo date("g:i A", strtotime($s['start_time'])) . ' - ' . date("g:i A", strtotime($s['end_time'])); ?></small>
                             </td>
                             <td>
-                                <!-- Pass data to JS via onclick for editing -->
                                 <button type="button" onclick="editDuty(<?php echo $s['schedule_id']; ?>, <?php echo $s['user_id']; ?>, <?php echo $s['landmark_id']; ?>, '<?php echo $s['day_of_week']; ?>', '<?php echo $s['start_time']; ?>', '<?php echo $s['end_time']; ?>')">Edit</button>
                                 
                                 <form method="POST" style="display:inline;" onsubmit="return confirm('Remove this shift?');">
@@ -312,7 +290,6 @@ $json_landmarks = json_encode($landmark_data);
         </div>
     </div>
 
-    <!-- REMAINDER OF DASHBOARD -->
     <div class="panel">
         <h3>District Landmark Management</h3>
         <p>Add specific towns or landmarks to a single district. This maps places for duty assignments and citizen reports.</p>
@@ -392,9 +369,10 @@ $json_landmarks = json_encode($landmark_data);
                         <?php if ($u['role_id'] == 2): ?>
                             <span class="badge-role">Officer</span>
                             <?php if ($u['is_approved'] == 0) echo " <small>(Pending)</small>"; ?>
-                            <br><small>Dist: <?php echo htmlspecialchars($u['officer_district'] ?? 'N/A'); ?></small>
+                            <br><small>Dist: <?php echo htmlspecialchars($u['district'] ?? 'N/A'); ?></small>
                         <?php else: ?>
                             <span class="badge-role">Citizen</span>
+                            <br><small>Dist: <?php echo htmlspecialchars($u['district'] ?? 'N/A'); ?></small>
                         <?php endif; ?>
                     </td>
                     <td>
@@ -410,15 +388,10 @@ $json_landmarks = json_encode($landmark_data);
     </div>
 </div>
 
-<!-- ============================================== -->
-<!-- JAVASCRIPT: Dynamic Duty Roster Controls -->
-<!-- ============================================== -->
 <script>
-    // JSON Data supplied directly by PHP
     const officerDistricts = <?php echo $json_officers; ?>;
     const dbLandmarks = <?php echo $json_landmarks; ?>;
 
-    // Filters the Landmarks dropdown based on the Officer's registered district
     function filterLandmarks(selectedLandmarkId = null) {
         const offId = document.getElementById('sel_officer').value;
         const landSelect = document.getElementById('sel_landmark');
@@ -432,7 +405,6 @@ $json_landmarks = json_encode($landmark_data);
                     let opt = document.createElement('option');
                     opt.value = place.id;
                     opt.text = place.name + " (" + dist + ")";
-                    // Pre-select if editing
                     if (selectedLandmarkId && place.id == selectedLandmarkId) {
                         opt.selected = true;
                     }
@@ -446,14 +418,11 @@ $json_landmarks = json_encode($landmark_data);
         }
     }
 
-    // Handles moving table data into the form for Editing
     function editDuty(schedule_id, officer_id, landmark_id, day_of_week, start_time, end_time) {
         document.getElementById('form_title').innerText = "Modify Duty Shift";
         document.getElementById('edit_schedule_id').value = schedule_id;
         
         document.getElementById('sel_officer').value = officer_id;
-        
-        // Populate landmarks for this specific officer first
         filterLandmarks(landmark_id);
         
         document.getElementById('sel_day').value = day_of_week;
@@ -466,7 +435,6 @@ $json_landmarks = json_encode($landmark_data);
         window.scrollTo({ top: document.getElementById('dutyForm').offsetTop - 50, behavior: 'smooth' });
     }
 
-    // Clears the form back to Add mode
     function cancelEdit() {
         document.getElementById('form_title').innerText = "Assign New Duty Slot";
         document.getElementById('edit_schedule_id').value = "";

@@ -12,13 +12,13 @@ if (isset($_POST['register'])) {
     $password = password_hash($_POST['password'], PASSWORD_BCRYPT);
     $account_type = $_POST['account_type'];
     
-    // NEW: Capture the district (Null for public, Required for officers)
-    $officer_district = ($account_type === 'officer') ? $_POST['officer_district'] : NULL;
+    // Capture the district for EVERYONE
+    $user_district = $_POST['user_district'];
     
     if ($account_type === 'officer') {
         $role_id = 2;
         $is_approved = 0; 
-        $success_msg = "Application submitted for $officer_district district! Please wait for Admin approval.";
+        $success_msg = "Application submitted for $user_district district! Please wait for Admin approval.";
     } else {
         $role_id = 3;
         $is_approved = 1; 
@@ -26,8 +26,9 @@ if (isset($_POST['register'])) {
     }
     
     try {
-        $stmt = $pdo->prepare("INSERT INTO Users (name, email, password_hash, role_id, is_approved, officer_district) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$name, $email, $password, $role_id, $is_approved, $officer_district]);
+        // Updated to use the new 'district' column
+        $stmt = $pdo->prepare("INSERT INTO Users (name, email, password_hash, role_id, is_approved, district) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$name, $email, $password, $role_id, $is_approved, $user_district]);
         $msg = "<div class='alert'>$success_msg</div>";
     } catch (PDOException $e) {
         $msg = "<div class='alert'>Error: Email might already exist.</div>";
@@ -73,7 +74,7 @@ if (isset($_POST['login'])) {
         input, select { width: 100%; padding: 8px; margin: 10px 0; border: 1px solid #000; box-sizing: border-box; }
         button { width: 100%; padding: 10px; background: #eeeeee; border: 1px solid #000; color: #000; cursor: pointer; font-weight: bold; }
         .alert { border: 1px solid #000; padding: 10px; margin-bottom: 15px; font-weight: bold; }
-        .district-box { display: none; border: 1px dashed #000; padding: 10px; margin-top: 10px; }
+        .district-box { border: 1px dashed #000; padding: 10px; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -90,14 +91,14 @@ if (isset($_POST['login'])) {
     <div class="card">
         <h2>System Registration</h2>
         <form method="POST">
-            <select name="account_type" id="account_type" required onchange="toggleDistrictField()">
+            <select name="account_type" id="account_type" required>
                 <option value="public">Standard Public Account</option>
                 <option value="officer">Traffic Police Officer</option>
             </select>
             
             <div id="district_box" class="district-box">
-                <label style="font-weight: bold;">Request Duty District</label>
-                <select name="officer_district" id="officer_district">
+                <label style="font-weight: bold;">Select Your District</label>
+                <select name="user_district" id="user_district" required>
                     <option value="">-- Select Your District --</option>
                     <?php foreach($districts as $d) echo "<option value='$d'>$d</option>"; ?>
                 </select>
@@ -109,22 +110,5 @@ if (isset($_POST['login'])) {
             <button type="submit" name="register">Register Account</button>
         </form>
     </div>
-
-    <script>
-        function toggleDistrictField() {
-            var type = document.getElementById("account_type").value;
-            var distBox = document.getElementById("district_box");
-            var distInput = document.getElementById("officer_district");
-            
-            if (type === "officer") {
-                distBox.style.display = "block";
-                distInput.setAttribute("required", "required");
-            } else {
-                distBox.style.display = "none";
-                distInput.removeAttribute("required");
-                distInput.value = ""; // Reset
-            }
-        }
-    </script>
 </body>
 </html>

@@ -2,7 +2,6 @@
 require 'db.php';
 session_start();
 
-// Ensure time logic matches Sri Lanka time for the Duty Roster
 date_default_timezone_set('Asia/Colombo');
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 2) {
@@ -20,16 +19,16 @@ $current_time = date('H:i:s');
 if (isset($_POST['update_status'])) {
     $report_id = $_POST['report_id'];
     $new_status = $_POST['status'];
-    $pdo->prepare("UPDATE IncidentReports SET status = ? WHERE report_id = ?")->execute([$new_status, $report_id]);
+    $pdo->prepare("UPDATE Reports SET status = ? WHERE report_id = ?")->execute([$new_status, $report_id]);
     $msg = "<div class='alert'>Incident status updated.</div>";
 }
 
-// B. Issue Citation (Smart Input: Registered or Unregistered)
+// B. Issue Citation
 if (isset($_POST['issue_ticket'])) {
     $vehicle_plate = strtoupper(trim($_POST['vehicle_plate'])); 
     $violation_id = $_POST['violation_id'];
     
-    $stmt = $pdo->prepare("INSERT INTO Fines (citizen_license, vehicle_plate, violation_id, issuing_officer_id) VALUES ('PENDING_REGISTRATION', ?, ?, ?)");
+    $stmt = $pdo->prepare("INSERT INTO Fines (vehicle_plate, violation_id, issuing_officer_id) VALUES (?, ?, ?)");
     $stmt->execute([$vehicle_plate, $violation_id, $officer_id]);
     $msg = "<div class='alert'>Citation attached to vehicle <strong>$vehicle_plate</strong>. If unregistered, it will link automatically when the owner makes an account.</div>";
 }
@@ -39,13 +38,13 @@ if (isset($_POST['issue_ticket'])) {
 // ==========================================
 
 // 1. Fetch Officer's Registered District
-$officer_dist = $pdo->query("SELECT officer_district FROM Users WHERE user_id = " . intval($officer_id))->fetchColumn();
+$officer_dist = $pdo->query("SELECT district FROM Users WHERE user_id = " . intval($officer_id))->fetchColumn();
 
 // 2. Fetch the Weekly Landmark Duty Schedule
 $schedules = $pdo->prepare("
     SELECT ds.day_of_week, ds.start_time, ds.end_time, l.landmark_name, l.district 
     FROM DutySchedules ds 
-    JOIN DistrictLandmarks l ON ds.landmark_id = l.landmark_id 
+    JOIN Landmarks l ON ds.landmark_id = l.landmark_id 
     WHERE ds.user_id = ? 
     ORDER BY FIELD(ds.day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'), ds.start_time ASC
 ");
@@ -56,7 +55,7 @@ $schedules = $schedules->fetchAll();
 $active_duty_stmt = $pdo->prepare("
     SELECT l.landmark_name 
     FROM DutySchedules ds 
-    JOIN DistrictLandmarks l ON ds.landmark_id = l.landmark_id 
+    JOIN Landmarks l ON ds.landmark_id = l.landmark_id 
     WHERE ds.user_id = ? AND ds.day_of_week = ? AND ds.start_time <= ? AND ds.end_time >= ?
 ");
 $active_duty_stmt->execute([$officer_id, $current_day, $current_time, $current_time]);
@@ -70,22 +69,22 @@ if ($active_duty) {
     $active_landmark = $active_duty['landmark_name'];
     
     // Hazards exactly at the officer's current post
-    $stmt = $pdo->prepare("SELECT * FROM IncidentReports WHERE location_from = ? AND specific_landmark = ? AND status != 'Resolved' ORDER BY timestamp DESC");
+    $stmt = $pdo->prepare("SELECT * FROM Reports WHERE location_from = ? AND specific_landmark = ? AND status != 'Resolved' ORDER BY timestamp DESC");
     $stmt->execute([$officer_dist, $active_landmark]);
     $duty_incidents = $stmt->fetchAll();
     
     // Remaining hazards in the rest of the district
-    $stmt2 = $pdo->prepare("SELECT * FROM IncidentReports WHERE location_from = ? AND specific_landmark != ? AND status != 'Resolved' ORDER BY timestamp DESC");
+    $stmt2 = $pdo->prepare("SELECT * FROM Reports WHERE location_from = ? AND specific_landmark != ? AND status != 'Resolved' ORDER BY timestamp DESC");
     $stmt2->execute([$officer_dist, $active_landmark]);
     $other_incidents = $stmt2->fetchAll();
 } else {
     // If not on duty, all district hazards fall into the "other" category
-    $stmt = $pdo->prepare("SELECT * FROM IncidentReports WHERE location_from = ? AND status != 'Resolved' ORDER BY timestamp DESC");
+    $stmt = $pdo->prepare("SELECT * FROM Reports WHERE location_from = ? AND status != 'Resolved' ORDER BY timestamp DESC");
     $stmt->execute([$officer_dist]);
     $other_incidents = $stmt->fetchAll();
 }
 
-$violations = $pdo->query("SELECT * FROM ViolationsMaster")->fetchAll();
+$violations = $pdo->query("SELECT * FROM Violations")->fetchAll();
 $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Vehicles ORDER BY license_plate ASC")->fetchAll();
 ?>
 <!DOCTYPE html>

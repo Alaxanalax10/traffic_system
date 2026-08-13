@@ -2,7 +2,6 @@
 require 'db.php';
 session_start();
 
-// Set system timezone to Sri Lanka for accurate duty roster matching
 date_default_timezone_set('Asia/Colombo');
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 3) {
@@ -84,8 +83,8 @@ if (isset($_POST['report_issue'])) {
     $incident_district = $_POST['incident_district']; 
     $landmark = $_POST['specific_landmark'];
     
-    $pdo->prepare("INSERT INTO IncidentReports (reporter_id, hazard_type, description, location_from, location_to, specific_landmark) VALUES (?, ?, ?, ?, ?, ?)")
-        ->execute([$user_id, $hazard, $desc, $incident_district, $incident_district, $landmark]);
+    $pdo->prepare("INSERT INTO Reports (reporter_id, hazard_type, description, location_from, specific_landmark) VALUES (?, ?, ?, ?, ?)")
+        ->execute([$user_id, $hazard, $desc, $incident_district, $landmark]);
     $msg = "<div class='alert'>Hazard reported successfully at <strong>$landmark, $incident_district</strong>. Dispatchers notified.</div>";
 }
 
@@ -103,16 +102,13 @@ if (isset($_GET['search_route'])) {
     $calculated_route = getRoutePath($from, $to);
     $in_placeholders = str_repeat('?,', count($calculated_route) - 1) . '?';
     
-    // Grab exact current day and time to cross-reference with duty roster
     $current_day = date('l'); 
     $current_time = date('H:i:s');
     
-    // Complex SQL Join: It finds the incident, matches the landmark to the database, 
-    // checks who is on duty there EXACTLY right now, and fetches their name!
     $sql = "
         SELECT r.*, u.name AS active_officer 
-        FROM IncidentReports r
-        LEFT JOIN DistrictLandmarks dl 
+        FROM Reports r
+        LEFT JOIN Landmarks dl 
             ON r.specific_landmark = dl.landmark_name AND r.location_from = dl.district
         LEFT JOIN DutySchedules ds 
             ON dl.landmark_id = ds.landmark_id 
@@ -127,7 +123,6 @@ if (isset($_GET['search_route'])) {
     
     $stmt = $pdo->prepare($sql);
     
-    // Bind the variables securely: day, time, time, then the route districts array
     $params = array_merge([$current_day, $current_time, $current_time], $calculated_route);
     $stmt->execute($params);
     $incidents = $stmt->fetchAll();
@@ -137,13 +132,13 @@ $vehicles = $pdo->prepare("SELECT * FROM Vehicles WHERE user_id = ? ORDER BY reg
 $vehicles->execute([$user_id]); 
 $vehicles = $vehicles->fetchAll();
 
-$my_fines = $pdo->prepare("SELECT f.*, v.violation_name, v.standard_fine FROM Fines f JOIN ViolationsMaster v ON f.violation_id = v.violation_id WHERE f.vehicle_plate IN (SELECT license_plate FROM Vehicles WHERE user_id = ?) ORDER BY f.status DESC, f.issued_date DESC");
+$my_fines = $pdo->prepare("SELECT f.*, v.violation_name, v.standard_fine FROM Fines f JOIN Violations v ON f.violation_id = v.violation_id WHERE f.vehicle_plate IN (SELECT license_plate FROM Vehicles WHERE user_id = ?) ORDER BY f.status DESC, f.issued_date DESC");
 $my_fines->execute([$user_id]); 
 $my_fines = $my_fines->fetchAll();
 
 $districts = ["Colombo", "Gampaha", "Kandy", "Kurunegala", "Jaffna", "Kilinochchi", "Vavuniya", "Anuradhapura", "Galle", "Matara"];
 
-$db_landmarks = $pdo->query("SELECT * FROM DistrictLandmarks")->fetchAll();
+$db_landmarks = $pdo->query("SELECT * FROM Landmarks")->fetchAll();
 $js_district_matrix = [];
 foreach($db_landmarks as $l) {
     $dist = $l['district'];
