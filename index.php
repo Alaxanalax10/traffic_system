@@ -3,7 +3,7 @@ require 'db.php';
 session_start();
 
 $msg = "";
-$districts = ["Colombo", "Gampaha", "Kandy", "Kurunegala", "Jaffna", "Kilinochchi", "Vavuniya", "Anuradhapura", "Galle", "Matara"];
+$districts = $pdo->query("SELECT district_id, district_name FROM Districts ORDER BY district_name")->fetchAll();
 
 // --- REGISTRATION LOGIC ---
 if (isset($_POST['register'])) {
@@ -12,25 +12,28 @@ if (isset($_POST['register'])) {
     $password = password_hash($_POST['password'], PASSWORD_BCRYPT);
     $account_type = $_POST['account_type'];
     
-    // Capture the district for EVERYONE
-    $user_district = $_POST['user_district'];
+    $user_district = (int)$_POST['user_district'];
     
     if ($account_type === 'officer') {
-        $role_id = 2;
-        $is_approved = 0; 
-        $success_msg = "Application submitted for $user_district district! Please wait for Admin approval.";
+        $role = 'Officer';
+        $success_msg = "Application submitted! Please wait for Admin approval.";
     } else {
-        $role_id = 3;
-        $is_approved = 1; 
+        $role = 'Citizen';
         $success_msg = "Registration successful! You may now log in.";
     }
     
     try {
-        // Updated to use the new 'district' column
-        $stmt = $pdo->prepare("INSERT INTO Users (name, email, password_hash, role_id, is_approved, district) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$name, $email, $password, $role_id, $is_approved, $user_district]);
+        $pdo->beginTransaction();
+        $new_user_id = $pdo->query("SELECT UUID()")->fetchColumn();
+        $stmt = $pdo->prepare("INSERT INTO Users (user_id, name, email, password_hash, role, district_id) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$new_user_id, $name, $email, $password, $role, $user_district]);
+        if ($role === 'Officer') {
+            $pdo->prepare("INSERT INTO Officers (officer_id) VALUES (?)")->execute([$new_user_id]);
+        }
+        $pdo->commit();
         $msg = "<div class='alert'>$success_msg</div>";
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         $msg = "<div class='alert'>Error: Email might already exist.</div>";
     }
 }
@@ -40,20 +43,20 @@ if (isset($_POST['login'])) {
     $email = $_POST['email'];
     $password = $_POST['password'];
     
-    $stmt = $pdo->prepare("SELECT * FROM Users WHERE email = ?");
+    $stmt = $pdo->prepare("SELECT u.*, o.is_approved FROM Users u LEFT JOIN Officers o ON o.officer_id = u.user_id WHERE u.email = ?");
     $stmt->execute([$email]);
     $user = $stmt->fetch();
     
     if ($user && password_verify($password, $user['password_hash'])) {
-        if ($user['is_approved'] == 0) {
+        if ($user['role'] === 'Officer' && !$user['is_approved']) {
             $msg = "<div class='alert'>Access Denied: Your Officer account is still pending Admin approval.</div>";
         } else {
             $_SESSION['user_id'] = $user['user_id'];
-            $_SESSION['role_id'] = $user['role_id'];
+            $_SESSION['role'] = $user['role'];
             $_SESSION['user_name'] = $user['name'];
             
-            if ($user['role_id'] == 1) header("Location: admin_dashboard.php");
-            elseif ($user['role_id'] == 2) header("Location: officer_dashboard.php");
+            if ($user['role'] === 'Admin') header("Location: admin_dashboard.php");
+            elseif ($user['role'] === 'Officer') header("Location: officer_dashboard.php");
             else header("Location: public_dashboard.php");
             exit;
         }
@@ -100,7 +103,7 @@ if (isset($_POST['login'])) {
                 <label style="font-weight: bold;">Select Your District</label>
                 <select name="user_district" id="user_district" required>
                     <option value="">-- Select Your District --</option>
-                    <?php foreach($districts as $d) echo "<option value='$d'>$d</option>"; ?>
+                    <?php foreach($districts as $d) echo "<option value='{$d['district_id']}'>" . htmlspecialchars($d['district_name']) . "</option>"; ?>
                 </select>
             </div>
 

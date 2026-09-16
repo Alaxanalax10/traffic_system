@@ -3,15 +3,15 @@ require 'db.php';
 session_start();
 
 // 1. Authorization Gate
-if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 1) {
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'Admin') {
     header("Location: index.php");
     exit;
 }
 
 $msg = "";
 
-$districts = ["Colombo", "Gampaha", "Kandy", "Kurunegala", "Jaffna", "Kilinochchi", "Vavuniya", "Anuradhapura", "Galle", "Matara"];
-$days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+$districts = $pdo->query("SELECT district_id, district_name FROM Districts ORDER BY district_name")->fetchAll();
+$days_of_week = [0 => "Sunday", 1 => "Monday", 2 => "Tuesday", 3 => "Wednesday", 4 => "Thursday", 5 => "Friday", 6 => "Saturday"];
 
 // ==========================================
 // HANDLE FORM SUBMISSIONS (POST REQUESTS)
@@ -29,8 +29,12 @@ if (isset($_POST['save_duty'])) {
     $days = isset($_POST['day_of_week']) ? (array)$_POST['day_of_week'] : [];
     
     // 1. Strict Validation: District Match
-    $off_dist = $pdo->query("SELECT district FROM Users WHERE user_id = " . intval($officer_id))->fetchColumn();
-    $land_dist = $pdo->query("SELECT district FROM Landmarks WHERE landmark_id = " . intval($landmark_id))->fetchColumn();
+    $stmt = $pdo->prepare("SELECT district_id FROM Users WHERE user_id = ?");
+    $stmt->execute([$officer_id]);
+    $off_dist = (int)$stmt->fetchColumn();
+    $stmt = $pdo->prepare("SELECT district_id FROM Landmarks WHERE landmark_id = ?");
+    $stmt->execute([$landmark_id]);
+    $land_dist = (int)$stmt->fetchColumn();
     
     if (empty($days)) {
         $msg = "<div class='alert'>ERROR: Please select at least one day.</div>";
@@ -43,7 +47,7 @@ if (isset($_POST['save_duty'])) {
         // 2. Strict Validation: Overlap Detection for Multiple Days
         $conflicts = [];
         foreach ($days as $day) {
-            $overlap_query = "SELECT u.name FROM DutySchedules ds JOIN Users u ON ds.user_id = u.user_id 
+            $overlap_query = "SELECT u.name FROM DutySchedules ds JOIN Users u ON ds.officer_id = u.user_id
                               WHERE ds.landmark_id = ? AND ds.day_of_week = ? 
                               AND ds.start_time < ? AND ds.end_time > ?";
             $params = [$landmark_id, $day, $end, $start];
@@ -74,7 +78,7 @@ if (isset($_POST['save_duty'])) {
                 $pdo->prepare("DELETE FROM DutySchedules WHERE schedule_id = ?")->execute([$schedule_id]);
             }
             
-            $insert_stmt = $pdo->prepare("INSERT INTO DutySchedules (user_id, landmark_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?, ?)");
+            $insert_stmt = $pdo->prepare("INSERT INTO DutySchedules (officer_id, landmark_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?, ?)");
             foreach ($days as $day) {
                 $insert_stmt->execute([$officer_id, $landmark_id, $day, $start, $end]);
             }
@@ -92,7 +96,7 @@ if (isset($_POST['delete_duty'])) {
 
 // Admin approvals and rejections...
 if (isset($_POST['approve_officer'])) {
-    $pdo->prepare("UPDATE Users SET is_approved = 1 WHERE user_id = ?")->execute([$_POST['target_id']]);
+    $pdo->prepare("UPDATE Officers SET is_approved = 1 WHERE officer_id = ?")->execute([$_POST['target_id']]);
     $msg = "<div class='alert'>Officer account activated.</div>";
 }
 if (isset($_POST['reject_officer'])) {
@@ -102,7 +106,7 @@ if (isset($_POST['reject_officer'])) {
 
 // Landmark Management...
 if (isset($_POST['add_landmark'])) {
-    $pdo->prepare("INSERT INTO Landmarks (district, landmark_name) VALUES (?, ?)")->execute([$_POST['district'], trim($_POST['landmark_name'])]);
+    $pdo->prepare("INSERT INTO Landmarks (district_id, landmark_name) VALUES (?, ?)")->execute([(int)$_POST['district'], trim($_POST['landmark_name'])]);
     $msg = "<div class='alert'>Landmark added.</div>";
 }
 if (isset($_POST['delete_landmark'])) {
@@ -123,10 +127,6 @@ if (isset($_POST['admin_delete_vehicle'])) {
 if (isset($_POST['delete_user'])) {
     $t_id = $_POST['target_user_id'];
     
-    $pdo->prepare("DELETE FROM DutySchedules WHERE user_id = ?")->execute([$t_id]);
-    $pdo->prepare("DELETE FROM Reports WHERE reporter_id = ?")->execute([$t_id]);
-    $pdo->prepare("DELETE FROM Vehicles WHERE user_id = ?")->execute([$t_id]); 
-    $pdo->prepare("DELETE FROM Fines WHERE issuing_officer_id = ?")->execute([$t_id]); 
     $pdo->prepare("DELETE FROM Users WHERE user_id = ?")->execute([$t_id]);
     
     $msg = "<div class='alert'>Account deleted.</div>";
@@ -136,33 +136,34 @@ if (isset($_POST['delete_user'])) {
 // FETCH DATA FOR UI DISPLAY
 // ==========================================
 
-$pending_officers = $pdo->query("SELECT * FROM Users WHERE role_id = 2 AND is_approved = 0")->fetchAll();
-$active_officers = $pdo->query("SELECT user_id, name, district FROM Users WHERE role_id = 2 AND is_approved = 1 ORDER BY district ASC, name ASC")->fetchAll();
-$all_landmarks = $pdo->query("SELECT * FROM Landmarks ORDER BY district ASC, landmark_name ASC")->fetchAll();
+$pending_officers = $pdo->query("SELECT u.*, o.is_approved, d.district_name FROM Users u JOIN Officers o ON o.officer_id = u.user_id LEFT JOIN Districts d ON d.district_id = u.district_id WHERE u.role = 'Officer' AND o.is_approved = 0")->fetchAll();
+$active_officers = $pdo->query("SELECT u.user_id, u.name, u.district_id, d.district_name FROM Users u JOIN Officers o ON o.officer_id = u.user_id LEFT JOIN Districts d ON d.district_id = u.district_id WHERE u.role = 'Officer' AND o.is_approved = 1 ORDER BY d.district_name, u.name")->fetchAll();
+$all_landmarks = $pdo->query("SELECT l.*, d.district_name FROM Landmarks l JOIN Districts d ON d.district_id = l.district_id ORDER BY d.district_name, l.landmark_name")->fetchAll();
 
 // Fetch Full Roster (Officers assigned to landmarks)
 $schedules = $pdo->query("
-    SELECT ds.*, u.name AS officer_name, u.district, l.landmark_name, l.district AS landmark_district 
+    SELECT ds.*, u.name AS officer_name, d.district_name, l.landmark_name, l.district_id AS landmark_district
     FROM DutySchedules ds 
-    JOIN Users u ON ds.user_id = u.user_id 
+    JOIN Users u ON ds.officer_id = u.user_id
     JOIN Landmarks l ON ds.landmark_id = l.landmark_id
-    ORDER BY FIELD(ds.day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'), ds.start_time ASC
+    JOIN Districts d ON d.district_id = u.district_id
+    ORDER BY ds.day_of_week, ds.start_time ASC
 ")->fetchAll();
 
-$all_users = $pdo->query("SELECT user_id, name, email, role_id, is_approved, district FROM Users WHERE role_id IN (2, 3) ORDER BY role_id ASC, name ASC")->fetchAll();
+$all_users = $pdo->query("SELECT u.user_id, u.name, u.email, u.role, o.is_approved, d.district_name FROM Users u LEFT JOIN Officers o ON o.officer_id = u.user_id LEFT JOIN Districts d ON d.district_id = u.district_id WHERE u.role IN ('Officer', 'Citizen') ORDER BY u.role, u.name")->fetchAll();
 $all_vehicles = $pdo->query("SELECT v.license_plate, v.vehicle_model, v.registered_date, u.name AS owner_name, u.email FROM Vehicles v JOIN Users u ON v.user_id = u.user_id ORDER BY v.registered_date DESC")->fetchAll();
 
 // Prepare JSON for Javascript Dynamic Filtering
 $officer_data = [];
 foreach($active_officers as $o) {
-    $officer_data[$o['user_id']] = $o['district'];
+    $officer_data[$o['user_id']] = $o['district_id'];
 }
 $json_officers = json_encode($officer_data);
 
 $landmark_data = [];
 foreach($all_landmarks as $l) {
-    if(!isset($landmark_data[$l['district']])) $landmark_data[$l['district']] = [];
-    $landmark_data[$l['district']][] = ["id" => $l['landmark_id'], "name" => $l['landmark_name']];
+    if(!isset($landmark_data[$l['district_id']])) $landmark_data[$l['district_id']] = [];
+    $landmark_data[$l['district_id']][] = ["id" => $l['landmark_id'], "name" => $l['landmark_name']];
 }
 $json_landmarks = json_encode($landmark_data);
 ?>
@@ -209,7 +210,7 @@ $json_landmarks = json_encode($landmark_data);
             <tr>
                 <td><strong><?php echo htmlspecialchars($po['name']); ?></strong></td>
                 <td><?php echo htmlspecialchars($po['email']); ?></td>
-                <td>[<?php echo htmlspecialchars($po['district'] ?? 'N/A'); ?>]</td>
+                <td>[<?php echo htmlspecialchars($po['district_name'] ?? 'N/A'); ?>]</td>
                 <td>
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="target_id" value="<?php echo $po['user_id']; ?>">
@@ -241,7 +242,7 @@ $json_landmarks = json_encode($landmark_data);
                         <option value="">-- Choose Officer --</option>
                         <?php foreach($active_officers as $off): ?>
                             <option value="<?php echo $off['user_id']; ?>">
-                                <?php echo htmlspecialchars($off['name']); ?> [<?php echo htmlspecialchars($off['district']); ?>]
+                                <?php echo htmlspecialchars($off['name']); ?> [<?php echo htmlspecialchars($off['district_name']); ?>]
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -254,7 +255,7 @@ $json_landmarks = json_encode($landmark_data);
                     <label>Day(s) of the Week <small>(Hold CTRL or CMD to select multiple)</small></label>
                     <!-- UPDATED: Added name="[]", multiple attribute, and height for visibility -->
                     <select name="day_of_week[]" id="sel_day" multiple required style="height: 140px;">
-                        <?php foreach($days_of_week as $day) echo "<option value='$day'>$day</option>"; ?>
+                        <?php foreach($days_of_week as $day_number => $day_name) echo "<option value='$day_number'>$day_name</option>"; ?>
                     </select>
                     
                     <div class="flex-container">
@@ -283,15 +284,15 @@ $json_landmarks = json_encode($landmark_data);
                         <tr>
                             <td>
                                 <strong><?php echo htmlspecialchars($s['officer_name']); ?></strong><br>
-                                <small><?php echo htmlspecialchars($s['district']); ?> Dist.</small>
+                                <small><?php echo htmlspecialchars($s['district_name']); ?> Dist.</small>
                             </td>
                             <td><strong><?php echo htmlspecialchars($s['landmark_name']); ?></strong></td>
                             <td>
-                                <strong><?php echo $s['day_of_week']; ?></strong><br>
+                                <strong><?php echo htmlspecialchars($days_of_week[(int)$s['day_of_week']]); ?></strong><br>
                                 <small><?php echo date("g:i A", strtotime($s['start_time'])) . ' - ' . date("g:i A", strtotime($s['end_time'])); ?></small>
                             </td>
                             <td>
-                                <button type="button" onclick="editDuty(<?php echo $s['schedule_id']; ?>, <?php echo $s['user_id']; ?>, <?php echo $s['landmark_id']; ?>, '<?php echo $s['day_of_week']; ?>', '<?php echo $s['start_time']; ?>', '<?php echo $s['end_time']; ?>')">Edit</button>
+                                <button type="button" onclick="editDuty(<?php echo $s['schedule_id']; ?>, '<?php echo $s['officer_id']; ?>', <?php echo $s['landmark_id']; ?>, '<?php echo $s['day_of_week']; ?>', '<?php echo $s['start_time']; ?>', '<?php echo $s['end_time']; ?>')">Edit</button>
                                 
                                 <form method="POST" style="display:inline;" onsubmit="return confirm('Remove this shift?');">
                                     <input type="hidden" name="schedule_id" value="<?php echo $s['schedule_id']; ?>">
@@ -315,7 +316,7 @@ $json_landmarks = json_encode($landmark_data);
                 <label>Select Target District</label>
                 <select name="district" required style="margin:0;">
                     <option value="">-- District --</option>
-                    <?php foreach($districts as $d) echo "<option value='$d'>$d</option>"; ?>
+                    <?php foreach($districts as $d) echo "<option value='{$d['district_id']}'>" . htmlspecialchars($d['district_name']) . "</option>"; ?>
                 </select>
             </div>
             <div style="flex:2;">
@@ -333,7 +334,7 @@ $json_landmarks = json_encode($landmark_data);
                 <?php else: ?>
                     <?php foreach($all_landmarks as $l): ?>
                     <tr>
-                        <td><?php echo htmlspecialchars($l['district']); ?></td>
+                        <td><?php echo htmlspecialchars($l['district_name']); ?></td>
                         <td><strong><?php echo htmlspecialchars($l['landmark_name']); ?></strong></td>
                         <td>
                             <form method="POST" style="margin:0;">
@@ -382,13 +383,13 @@ $json_landmarks = json_encode($landmark_data);
                     <td><strong><?php echo htmlspecialchars($u['name']); ?></strong></td>
                     <td><?php echo htmlspecialchars($u['email']); ?></td>
                     <td>
-                        <?php if ($u['role_id'] == 2): ?>
+                        <?php if ($u['role'] === 'Officer'): ?>
                             <span class="badge-role">Officer</span>
-                            <?php if ($u['is_approved'] == 0) echo " <small>(Pending)</small>"; ?>
-                            <br><small>Dist: <?php echo htmlspecialchars($u['district'] ?? 'N/A'); ?></small>
+                            <?php if (!$u['is_approved']) echo " <small>(Pending)</small>"; ?>
+                            <br><small>Dist: <?php echo htmlspecialchars($u['district_name'] ?? 'N/A'); ?></small>
                         <?php else: ?>
                             <span class="badge-role">Citizen</span>
-                            <br><small>Dist: <?php echo htmlspecialchars($u['district'] ?? 'N/A'); ?></small>
+                            <br><small>Dist: <?php echo htmlspecialchars($u['district_name'] ?? 'N/A'); ?></small>
                         <?php endif; ?>
                     </td>
                     <td>
@@ -444,7 +445,7 @@ $json_landmarks = json_encode($landmark_data);
         // Handle selecting the correct day in the new multi-select box
         let selDay = document.getElementById('sel_day');
         for(let i = 0; i < selDay.options.length; i++) {
-            selDay.options[i].selected = (selDay.options[i].value === day_of_week);
+            selDay.options[i].selected = (selDay.options[i].value === String(day_of_week));
         }
         
         document.getElementById('sel_start').value = start_time;

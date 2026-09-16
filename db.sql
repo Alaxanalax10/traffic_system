@@ -1,113 +1,128 @@
--- Create the database
 CREATE DATABASE IF NOT EXISTS traffic_management;
 USE traffic_management;
 
--- ====================================================
--- 1. USERS TABLE (Handles Admins, Officers, and Citizens)
--- ====================================================
-CREATE TABLE IF NOT EXISTS Users (
-    user_id INT PRIMARY KEY AUTO_INCREMENT,
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS Payments;
+DROP TABLE IF EXISTS Fines;
+DROP TABLE IF EXISTS Violations;
+DROP TABLE IF EXISTS DutySchedules;
+DROP TABLE IF EXISTS Landmarks;
+DROP TABLE IF EXISTS Reports;
+DROP TABLE IF EXISTS Vehicles;
+DROP TABLE IF EXISTS Officers;
+DROP TABLE IF EXISTS Users;
+DROP TABLE IF EXISTS Districts;
+SET FOREIGN_KEY_CHECKS = 1;
+
+CREATE TABLE Districts (
+    district_id INT PRIMARY KEY AUTO_INCREMENT,
+    district_name VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE Users (
+    user_id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    role_id INT NOT NULL COMMENT '1=Admin, 2=Officer, 3=Citizen',
-    is_approved TINYINT(1) DEFAULT 0 COMMENT '0=Pending, 1=Approved',
-    district VARCHAR(50) DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    password_hash CHAR(60) NOT NULL,
+    role ENUM('Admin', 'Officer', 'Citizen') NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    district_id INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (district_id) REFERENCES Districts(district_id) ON DELETE SET NULL
 );
 
--- ====================================================
--- 2. DISTRICT LANDMARKS TABLE
--- ====================================================
-CREATE TABLE IF NOT EXISTS Landmarks (
+CREATE TABLE Officers (
+    officer_id CHAR(36) PRIMARY KEY,
+    is_approved TINYINT(1) NOT NULL DEFAULT 0,
+    phone_number VARCHAR(20) DEFAULT NULL,
+    FOREIGN KEY (officer_id) REFERENCES Users(user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE Landmarks (
     landmark_id INT PRIMARY KEY AUTO_INCREMENT,
-    district VARCHAR(50) NOT NULL,
-    landmark_name VARCHAR(100) NOT NULL
+    district_id INT NOT NULL,
+    landmark_name VARCHAR(100) NOT NULL,
+    FOREIGN KEY (district_id) REFERENCES Districts(district_id) ON DELETE CASCADE
 );
 
--- ====================================================
--- 3. DUTY SCHEDULES TABLE (Officer Roster)
--- ====================================================
-CREATE TABLE IF NOT EXISTS DutySchedules (
+CREATE TABLE DutySchedules (
     schedule_id INT PRIMARY KEY AUTO_INCREMENT,
-    user_id INT NOT NULL,
+    officer_id CHAR(36) NOT NULL,
     landmark_id INT NOT NULL,
-    day_of_week VARCHAR(15) NOT NULL,
+    day_of_week TINYINT NOT NULL COMMENT '0=Sunday, 1=Monday, ..., 6=Saturday',
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (officer_id) REFERENCES Officers(officer_id) ON DELETE CASCADE,
     FOREIGN KEY (landmark_id) REFERENCES Landmarks(landmark_id) ON DELETE CASCADE
 );
 
--- ====================================================
--- 4. VEHICLES TABLE (Citizen Garage)
--- ====================================================
-CREATE TABLE IF NOT EXISTS Vehicles (
+CREATE TABLE Vehicles (
     license_plate VARCHAR(20) PRIMARY KEY,
-    user_id INT NOT NULL,
+    user_id CHAR(36) NOT NULL,
     vehicle_model VARCHAR(100) NOT NULL,
-    registered_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    registered_date DATE DEFAULT (CURRENT_DATE),
     FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
 );
 
--- ====================================================
--- 5. VIOLATIONS MASTER TABLE (List of Offenses)
--- ====================================================
-CREATE TABLE IF NOT EXISTS Violations (
+CREATE TABLE Violations (
     violation_id INT PRIMARY KEY AUTO_INCREMENT,
     violation_name VARCHAR(100) NOT NULL,
-    standard_fine DECIMAL(10,2) NOT NULL
+    fine_amount DECIMAL(10,2) NOT NULL
 );
 
--- ====================================================
--- 6. FINES TABLE (Traffic Citations)
--- ====================================================
-CREATE TABLE IF NOT EXISTS Fines (
-    ticket_id INT PRIMARY KEY AUTO_INCREMENT,
+CREATE TABLE Fines (
+    fine_id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     vehicle_plate VARCHAR(20) NOT NULL,
     violation_id INT NOT NULL,
-    issuing_officer_id INT NOT NULL,
-    status VARCHAR(20) DEFAULT 'Unpaid',
+    officer_id CHAR(36) NOT NULL,
+    status ENUM('Unpaid', 'Paid', 'Appealed', 'Overdue') DEFAULT 'Unpaid',
     issued_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- Note: vehicle_plate is NOT a strict foreign key here because your PHP logic 
-    -- correctly allows officers to issue tickets to unregistered vehicles.
-    FOREIGN KEY (violation_id) REFERENCES Violations(violation_id) ON DELETE CASCADE,
-    FOREIGN KEY (issuing_officer_id) REFERENCES Users(user_id) ON DELETE CASCADE
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (vehicle_plate) REFERENCES Vehicles(license_plate) ON DELETE CASCADE,
+    FOREIGN KEY (violation_id) REFERENCES Violations(violation_id) ON DELETE RESTRICT,
+    FOREIGN KEY (officer_id) REFERENCES Officers(officer_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_fines_status ON Fines(status);
+
+CREATE TABLE Payments (
+    payment_id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+    fine_id CHAR(36) NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    transaction_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (fine_id) REFERENCES Fines(fine_id) ON DELETE CASCADE
 );
 
--- ====================================================
--- 7. INCIDENT REPORTS TABLE (Hazard tracking)
--- ====================================================
-CREATE TABLE IF NOT EXISTS Reports (
-    report_id INT PRIMARY KEY AUTO_INCREMENT,
-    reporter_id INT NOT NULL,
-    hazard_type VARCHAR(50) NOT NULL,
+CREATE TABLE Reports (
+    report_id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+    reporter_id CHAR(36) NOT NULL,
+    district_id INT NOT NULL,
+    investigator_id CHAR(36) DEFAULT NULL,
+    hazard_type ENUM('Accident', 'Pothole', 'Signal Failure', 'Traffic Jam', 'Other') NOT NULL,
     description TEXT NOT NULL,
-    location_from VARCHAR(50) NOT NULL COMMENT 'District Name',
-    specific_landmark VARCHAR(100) NOT NULL,
-    status VARCHAR(30) DEFAULT 'Investigating',
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (reporter_id) REFERENCES Users(user_id) ON DELETE CASCADE
+    status ENUM('Pending', 'Investigating', 'Resolved', 'Dismissed') DEFAULT 'Pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (reporter_id) REFERENCES Users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (district_id) REFERENCES Districts(district_id) ON DELETE CASCADE,
+    FOREIGN KEY (investigator_id) REFERENCES Officers(officer_id) ON DELETE SET NULL
 );
+CREATE INDEX idx_reports_status ON Reports(status);
 
+INSERT INTO Districts (district_name) VALUES
+('Colombo'), ('Gampaha'), ('Kalutara'), ('Kandy'), ('Jaffna');
 
--- ====================================================
--- INITIAL DATA SETUP (Run these to populate required data)
--- ====================================================
-
--- Insert a Default Admin Account
--- Email: admin@system.com | Password: password123
-INSERT INTO Users (name, email, password_hash, role_id, is_approved) 
+INSERT INTO Users (user_id, name, email, password_hash, role, is_active)
 VALUES (
-    'System Administrator', 
-    'admin@system.com', 
-    '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', -- This is the bcrypt hash for 'password123'
-    1, 
+    UUID(),
+    'System Administrator',
+    'admin@system.com',
+    '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+    'Admin',
     1
 );
 
--- Insert Default Traffic Violations so Officers can issue tickets
-INSERT INTO Violations (violation_name, standard_fine) VALUES 
+INSERT INTO Violations (violation_name, fine_amount) VALUES
 ('Speeding (10-20km/h over limit)', 3000.00),
 ('Speeding (20+ km/h over limit)', 5000.00),
 ('Running a Red Light', 2500.00),

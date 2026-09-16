@@ -4,7 +4,7 @@ session_start();
 
 date_default_timezone_set('Asia/Colombo');
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 2) {
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'Officer') {
     header("Location: index.php");
     exit;
 }
@@ -12,14 +12,15 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 2) {
 $officer_id = $_SESSION['user_id'];
 $msg = "";
 
-$current_day = date('l'); 
+$current_day = (int)date('w');
 $current_time = date('H:i:s');
 
 // A. Update Incident Status
 if (isset($_POST['update_status'])) {
     $report_id = $_POST['report_id'];
     $new_status = $_POST['status'];
-    $pdo->prepare("UPDATE Reports SET status = ? WHERE report_id = ?")->execute([$new_status, $report_id]);
+    $pdo->prepare("UPDATE Reports SET status = ?, investigator_id = ? WHERE report_id = ?")
+        ->execute([$new_status, $officer_id, $report_id]);
     $msg = "<div class='alert'>Incident status updated.</div>";
 }
 
@@ -28,7 +29,7 @@ if (isset($_POST['issue_ticket'])) {
     $vehicle_plate = strtoupper(trim($_POST['vehicle_plate'])); 
     $violation_id = $_POST['violation_id'];
     
-    $stmt = $pdo->prepare("INSERT INTO Fines (vehicle_plate, violation_id, issuing_officer_id) VALUES (?, ?, ?)");
+    $stmt = $pdo->prepare("INSERT INTO Fines (vehicle_plate, violation_id, officer_id) VALUES (?, ?, ?)");
     $stmt->execute([$vehicle_plate, $violation_id, $officer_id]);
     $msg = "<div class='alert'>Citation attached to vehicle <strong>$vehicle_plate</strong>. If unregistered, it will link automatically when the owner makes an account.</div>";
 }
@@ -38,15 +39,20 @@ if (isset($_POST['issue_ticket'])) {
 // ==========================================
 
 // 1. Fetch Officer's Registered District
-$officer_dist = $pdo->query("SELECT district FROM Users WHERE user_id = " . intval($officer_id))->fetchColumn();
+$officer_stmt = $pdo->prepare("SELECT u.district_id, d.district_name FROM Users u LEFT JOIN Districts d ON d.district_id = u.district_id WHERE u.user_id = ?");
+$officer_stmt->execute([$officer_id]);
+$officer = $officer_stmt->fetch();
+$officer_dist = $officer['district_id'];
+$officer_dist_name = $officer['district_name'];
 
 // 2. Fetch the Weekly Landmark Duty Schedule
 $schedules = $pdo->prepare("
-    SELECT ds.day_of_week, ds.start_time, ds.end_time, l.landmark_name, l.district 
+    SELECT ds.day_of_week, ds.start_time, ds.end_time, l.landmark_name, d.district_name
     FROM DutySchedules ds 
     JOIN Landmarks l ON ds.landmark_id = l.landmark_id 
-    WHERE ds.user_id = ? 
-    ORDER BY FIELD(ds.day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'), ds.start_time ASC
+    JOIN Districts d ON d.district_id = l.district_id
+    WHERE ds.officer_id = ?
+    ORDER BY ds.day_of_week, ds.start_time ASC
 ");
 $schedules->execute([$officer_id]);
 $schedules = $schedules->fetchAll();
@@ -56,7 +62,7 @@ $active_duty_stmt = $pdo->prepare("
     SELECT l.landmark_name 
     FROM DutySchedules ds 
     JOIN Landmarks l ON ds.landmark_id = l.landmark_id 
-    WHERE ds.user_id = ? AND ds.day_of_week = ? AND ds.start_time <= ? AND ds.end_time >= ?
+    WHERE ds.officer_id = ? AND ds.day_of_week = ? AND ds.start_time <= ? AND ds.end_time >= ?
 ");
 $active_duty_stmt->execute([$officer_id, $current_day, $current_time, $current_time]);
 $active_duty = $active_duty_stmt->fetch();
@@ -69,17 +75,17 @@ if ($active_duty) {
     $active_landmark = $active_duty['landmark_name'];
     
     // Hazards exactly at the officer's current post
-    $stmt = $pdo->prepare("SELECT * FROM Reports WHERE location_from = ? AND specific_landmark = ? AND status != 'Resolved' ORDER BY timestamp DESC");
-    $stmt->execute([$officer_dist, $active_landmark]);
+    $stmt = $pdo->prepare("SELECT r.*, d.district_name FROM Reports r JOIN Districts d ON d.district_id = r.district_id WHERE r.district_id = ? AND r.description LIKE ? AND r.status != 'Resolved' ORDER BY r.created_at DESC");
+    $stmt->execute([$officer_dist, '%' . $active_landmark . '%']);
     $duty_incidents = $stmt->fetchAll();
     
     // Remaining hazards in the rest of the district
-    $stmt2 = $pdo->prepare("SELECT * FROM Reports WHERE location_from = ? AND specific_landmark != ? AND status != 'Resolved' ORDER BY timestamp DESC");
-    $stmt2->execute([$officer_dist, $active_landmark]);
+    $stmt2 = $pdo->prepare("SELECT r.*, d.district_name FROM Reports r JOIN Districts d ON d.district_id = r.district_id WHERE r.district_id = ? AND r.description NOT LIKE ? AND r.status != 'Resolved' ORDER BY r.created_at DESC");
+    $stmt2->execute([$officer_dist, '%' . $active_landmark . '%']);
     $other_incidents = $stmt2->fetchAll();
 } else {
     // If not on duty, all district hazards fall into the "other" category
-    $stmt = $pdo->prepare("SELECT * FROM Reports WHERE location_from = ? AND status != 'Resolved' ORDER BY timestamp DESC");
+    $stmt = $pdo->prepare("SELECT r.*, d.district_name FROM Reports r JOIN Districts d ON d.district_id = r.district_id WHERE r.district_id = ? AND r.status != 'Resolved' ORDER BY r.created_at DESC");
     $stmt->execute([$officer_dist]);
     $other_incidents = $stmt->fetchAll();
 }
@@ -146,7 +152,7 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
                         <option value="">-- Select Offense --</option>
                         <?php foreach($violations as $v): ?>
                             <option value="<?php echo $v['violation_id']; ?>">
-                                <?php echo htmlspecialchars($v['violation_name']); ?> (Rs. <?php echo number_format($v['standard_fine'], 2); ?>)
+                                <?php echo htmlspecialchars($v['violation_name']); ?> (Rs. <?php echo number_format($v['fine_amount'], 2); ?>)
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -165,14 +171,14 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
                         <tr><th>Day</th><th>Time Window</th><th>Duty Location</th></tr>
                         <?php foreach($schedules as $shift): ?>
                         <tr>
-                            <td><strong><?php echo htmlspecialchars($shift['day_of_week']); ?></strong></td>
+                            <td><strong><?php echo date('l', strtotime('Sunday +' . (int)$shift['day_of_week'] . ' days')); ?></strong></td>
                             <td>
                                 <?php echo date("g:i A", strtotime($shift['start_time'])); ?> - <br>
                                 <?php echo date("g:i A", strtotime($shift['end_time'])); ?>
                             </td>
                             <td>
                                 <strong><?php echo htmlspecialchars($shift['landmark_name']); ?></strong><br>
-                                <small><?php echo htmlspecialchars($shift['district']); ?></small>
+                                <small><?php echo htmlspecialchars($shift['district_name']); ?></small>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -203,7 +209,7 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
                                 </span><br>
                                 
                                 <div class="location-box">
-                                    Target Town/Area: <?php echo htmlspecialchars($inc['specific_landmark']); ?>
+                                    District: <?php echo htmlspecialchars($inc['district_name']); ?>
                                 </div>
 
                                 <div class="description-box">
@@ -232,7 +238,7 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
             <!-- REMAINING DISTRICT HAZARDS -->
             <div class="panel">
                 <h3>Remaining District Hazards</h3>
-                <p>Showing unresolved emergencies in the rest of the <strong><?php echo htmlspecialchars($officer_dist); ?></strong> district.</p>
+                <p>Showing unresolved emergencies in the rest of the <strong><?php echo htmlspecialchars($officer_dist_name); ?></strong> district.</p>
                 
                 <?php if (empty($other_incidents)): ?>
                     <p>District clear.</p>
@@ -245,7 +251,7 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
                             </span><br>
                             
                             <div class="location-box">
-                                Target Town/Area: <?php echo htmlspecialchars($inc['specific_landmark']); ?>
+                                District: <?php echo htmlspecialchars($inc['district_name']); ?>
                             </div>
 
                             <div class="description-box">

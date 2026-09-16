@@ -4,7 +4,7 @@ session_start();
 
 date_default_timezone_set('Asia/Colombo');
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role_id'] != 3) {
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'Citizen') {
     header("Location: index.php");
     exit;
 }
@@ -40,7 +40,7 @@ function getRoutePath($start, $end) {
 
         if ($node === $end) return $path;
 
-        foreach ($graph[$node] as $neighbor) {
+        foreach ($graph[$node] ?? [] as $neighbor) {
             if (!isset($visited[$neighbor])) {
                 $visited[$neighbor] = true;
                 $new_path = $path;
@@ -73,19 +73,27 @@ if (isset($_POST['remove_vehicle'])) {
 }
 
 if (isset($_POST['pay_fine'])) {
-    $pdo->prepare("UPDATE Fines SET status = 'Paid' WHERE ticket_id = ?")->execute([$_POST['ticket_id']]);
+    $fine_id = $_POST['fine_id'];
+    $pdo->beginTransaction();
+    $pdo->prepare("INSERT INTO Payments (fine_id, amount) SELECT fine_id, v.fine_amount FROM Fines f JOIN Violations v ON v.violation_id = f.violation_id WHERE f.fine_id = ? AND f.status = 'Unpaid'")->execute([$fine_id]);
+    $pdo->prepare("UPDATE Fines SET status = 'Paid' WHERE fine_id = ? AND status = 'Unpaid'")->execute([$fine_id]);
+    $pdo->commit();
     $msg = "<div class='alert'>Payment processed successfully!</div>";
 }
 
 if (isset($_POST['report_issue'])) {
     $hazard = $_POST['hazard_type']; 
     $desc = $_POST['description']; 
-    $incident_district = $_POST['incident_district']; 
+    $incident_district = (int)$_POST['incident_district'];
     $landmark = $_POST['specific_landmark'];
     
-    $pdo->prepare("INSERT INTO Reports (reporter_id, hazard_type, description, location_from, specific_landmark) VALUES (?, ?, ?, ?, ?)")
-        ->execute([$user_id, $hazard, $desc, $incident_district, $landmark]);
-    $msg = "<div class='alert'>Hazard reported successfully at <strong>$landmark, $incident_district</strong>. Dispatchers notified.</div>";
+    $district_name = $pdo->prepare("SELECT district_name FROM Districts WHERE district_id = ?");
+    $district_name->execute([$incident_district]);
+    $district_name = $district_name->fetchColumn();
+    $desc = "Location: " . $landmark . "\n\n" . $desc;
+    $pdo->prepare("INSERT INTO Reports (reporter_id, district_id, hazard_type, description) VALUES (?, ?, ?, ?)")
+        ->execute([$user_id, $incident_district, $hazard, $desc]);
+    $msg = "<div class='alert'>Hazard reported successfully at <strong>" . htmlspecialchars($landmark) . ", " . htmlspecialchars($district_name) . "</strong>. Dispatchers notified.</div>";
 }
 
 // ==========================================
@@ -102,28 +110,18 @@ if (isset($_GET['search_route'])) {
     $calculated_route = getRoutePath($from, $to);
     $in_placeholders = str_repeat('?,', count($calculated_route) - 1) . '?';
     
-    $current_day = date('l'); 
-    $current_time = date('H:i:s');
-    
     $sql = "
-        SELECT r.*, u.name AS active_officer 
+        SELECT r.*, d.district_name
         FROM Reports r
-        LEFT JOIN Landmarks dl 
-            ON r.specific_landmark = dl.landmark_name AND r.location_from = dl.district
-        LEFT JOIN DutySchedules ds 
-            ON dl.landmark_id = ds.landmark_id 
-            AND ds.day_of_week = ? 
-            AND ds.start_time <= ? 
-            AND ds.end_time >= ?
-        LEFT JOIN Users u ON ds.user_id = u.user_id
-        WHERE r.location_from IN ($in_placeholders) 
-        AND r.status != 'Resolved' 
-        ORDER BY r.timestamp DESC
+        JOIN Districts d ON d.district_id = r.district_id
+        WHERE d.district_name IN ($in_placeholders)
+        AND r.status != 'Resolved'
+        ORDER BY r.created_at DESC
     ";
     
     $stmt = $pdo->prepare($sql);
     
-    $params = array_merge([$current_day, $current_time, $current_time], $calculated_route);
+    $params = $calculated_route;
     $stmt->execute($params);
     $incidents = $stmt->fetchAll();
 }
@@ -132,16 +130,17 @@ $vehicles = $pdo->prepare("SELECT * FROM Vehicles WHERE user_id = ? ORDER BY reg
 $vehicles->execute([$user_id]); 
 $vehicles = $vehicles->fetchAll();
 
-$my_fines = $pdo->prepare("SELECT f.*, v.violation_name, v.standard_fine FROM Fines f JOIN Violations v ON f.violation_id = v.violation_id WHERE f.vehicle_plate IN (SELECT license_plate FROM Vehicles WHERE user_id = ?) ORDER BY f.status DESC, f.issued_date DESC");
+$my_fines = $pdo->prepare("SELECT f.*, v.violation_name, v.fine_amount FROM Fines f JOIN Violations v ON f.violation_id = v.violation_id WHERE f.vehicle_plate IN (SELECT license_plate FROM Vehicles WHERE user_id = ?) ORDER BY f.status DESC, f.issued_date DESC");
 $my_fines->execute([$user_id]); 
 $my_fines = $my_fines->fetchAll();
 
-$districts = ["Colombo", "Gampaha", "Kandy", "Kurunegala", "Jaffna", "Kilinochchi", "Vavuniya", "Anuradhapura", "Galle", "Matara"];
+$districts = $pdo->query("SELECT district_id, district_name FROM Districts ORDER BY district_name")->fetchAll();
+$district_names = array_column($districts, 'district_name');
 
 $db_landmarks = $pdo->query("SELECT * FROM Landmarks")->fetchAll();
 $js_district_matrix = [];
 foreach($db_landmarks as $l) {
-    $dist = $l['district'];
+    $dist = $l['district_id'];
     if(!isset($js_district_matrix[$dist])) $js_district_matrix[$dist] = [];
     $js_district_matrix[$dist][] = $l['landmark_name'];
 }
@@ -225,11 +224,11 @@ $json_landmarks = json_encode($js_district_matrix);
                             <td><strong><?php echo htmlspecialchars($fine['vehicle_plate']); ?></strong></td>
                             <td><?php echo htmlspecialchars($fine['violation_name']); ?></td>
                             <td><?php echo date('M d', strtotime($fine['issued_date'])); ?></td>
-                            <td>Rs. <?php echo number_format($fine['standard_fine'], 2); ?></td>
+                            <td>Rs. <?php echo number_format($fine['fine_amount'], 2); ?></td>
                             <td>
                                 <?php if($fine['status'] == 'Unpaid'): ?>
                                     <form method="POST">
-                                        <input type="hidden" name="ticket_id" value="<?php echo $fine['ticket_id']; ?>">
+                                        <input type="hidden" name="fine_id" value="<?php echo $fine['fine_id']; ?>">
                                         <button type="submit" name="pay_fine">Pay Now</button>
                                     </form>
                                 <?php else: ?>
@@ -253,11 +252,11 @@ $json_landmarks = json_encode($js_district_matrix);
                 <div style="display: flex; gap: 10px;">
                     <select name="from" required style="flex: 1;">
                         <option value="">-- Start District --</option>
-                        <?php foreach($districts as $d) echo "<option value='$d'>$d</option>"; ?>
+                        <?php foreach($district_names as $d) echo "<option value='" . htmlspecialchars($d) . "'>" . htmlspecialchars($d) . "</option>"; ?>
                     </select>
                     <select name="to" required style="flex: 1;">
                         <option value="">-- End District --</option>
-                        <?php foreach($districts as $d) echo "<option value='$d'>$d</option>"; ?>
+                        <?php foreach($district_names as $d) echo "<option value='" . htmlspecialchars($d) . "'>" . htmlspecialchars($d) . "</option>"; ?>
                     </select>
                 </div>
                 <button type="submit" name="search_route" style="width: 100%;">Scan Entire Route</button>
@@ -278,7 +277,7 @@ $json_landmarks = json_encode($js_district_matrix);
                             <strong><?php echo htmlspecialchars($inc['hazard_type']); ?></strong><br>
                             
                             <div>
-                                <strong><?php echo htmlspecialchars($inc['specific_landmark']); ?></strong> (<?php echo htmlspecialchars($inc['location_from']); ?> Dist.)
+                                <strong><?php echo htmlspecialchars($inc['district_name']); ?></strong> District
                             </div>
                             
                             <div class="incident-details">
@@ -286,11 +285,7 @@ $json_landmarks = json_encode($js_district_matrix);
                             </div>
                             
                             <div class="officer-box">
-                                <?php if (!empty($inc['active_officer'])): ?>
-                                    <strong>Duty Officer Currently on Site:</strong> <?php echo htmlspecialchars($inc['active_officer']); ?>
-                                <?php else: ?>
-                                    <em>No active patrol assigned to this zone right now. Dispatching available units...</em>
-                                <?php endif; ?>
+                                <em>Traffic officers have been notified for this district.</em>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -304,15 +299,16 @@ $json_landmarks = json_encode($js_district_matrix);
                 <label>Hazard Category</label>
                 <select name="hazard_type" required>
                     <option value="Accident">Accident</option>
-                    <option value="Bridge Broken">Bridge Broken</option>
-                    <option value="Tree Crossing">Tree Crossing</option>
-                    <option value="Elephant Area">Elephant Area</option>
+                    <option value="Pothole">Pothole</option>
+                    <option value="Signal Failure">Signal Failure</option>
+                    <option value="Traffic Jam">Traffic Jam</option>
+                    <option value="Other">Other</option>
                 </select>
                 
                 <label>Incident District</label>
                 <select name="incident_district" id="report_district" required onchange="updateLandmarks()">
                     <option value="">-- Select Incident District --</option>
-                    <?php foreach($districts as $d) echo "<option value='$d'>$d</option>"; ?>
+                    <?php foreach($districts as $d) echo "<option value='{$d['district_id']}'>" . htmlspecialchars($d['district_name']) . "</option>"; ?>
                 </select>
                 
                 <label>Specific Town / Landmark</label>
