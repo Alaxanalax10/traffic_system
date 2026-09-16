@@ -152,26 +152,33 @@ $json_landmarks = json_encode($js_district_matrix);
     <meta charset="UTF-8">
     <title>Citizen Command Center</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background: #ffffff; color: #000000; }
-        .navbar { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
-        .navbar a { color: #000; text-decoration: none; border: 1px solid #000; padding: 5px 10px; }
-        .alert { border: 1px solid #000; padding: 10px; margin-bottom: 20px; font-weight: bold; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;}
-        .panel { border: 1px solid #000; padding: 15px; }
-        h3, h4 { border-bottom: 1px solid #000; padding-bottom: 5px; margin-top: 0; }
-        label { font-weight: bold; display: block; margin-top: 10px; }
-        input, select, textarea { width: 100%; padding: 8px; margin: 5px 0 10px 0; border: 1px solid #000; box-sizing: border-box;}
-        button { background: #eeeeee; color: #000; border: 1px solid #000; padding: 8px 15px; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { padding: 8px; border: 1px solid #000; text-align: left; }
-        .list-item { border: 1px dashed #000; padding: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
-        .route-path { border: 1px dashed #000; padding: 10px; text-align: center; font-weight: bold; margin-bottom: 15px; }
-        .incident-box { border: 1px solid #000; padding: 10px; margin: 10px 0; }
+        :root { --navy: #12233f; --blue: #2563eb; --blue-dark: #1d4ed8; --bg: #f4f7fb; --card: #fff; --border: #dbe3ef; --text: #1f2937; --muted: #64748b; }
+        * { box-sizing: border-box; }
+        body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 0; padding: 28px; background: var(--bg); color: var(--text); }
+        .navbar { display: flex; justify-content: space-between; align-items: center; background: var(--navy); color: #fff; border-radius: 14px; padding: 18px 24px; margin-bottom: 24px; box-shadow: 0 8px 20px rgba(18, 35, 63, .16); }
+        .navbar h2 { margin: 0; font-size: 1.35rem; }
+        .navbar a { color: #fff; text-decoration: none; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 9px 14px; }
+        .alert { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 9px; padding: 12px 14px; margin-bottom: 20px; font-weight: 600; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; box-shadow: 0 6px 18px rgba(31, 56, 88, .06); }
+        h3, h4 { color: var(--navy); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-top: 0; }
+        label { color: var(--muted); font-weight: 700; display: block; margin-top: 10px; }
+        input, select, textarea { width: 100%; padding: 10px 12px; margin: 5px 0 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
+        button { background: var(--blue); color: #fff; border: 0; border-radius: 8px; padding: 9px 15px; cursor: pointer; font-weight: 700; }
+        button:hover { background: var(--blue-dark); }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 15px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+        th { background: #eef4ff; color: var(--navy); font-size: .85rem; }
+        tr:last-child td { border-bottom: 0; }
+        .list-item { background: #f8fbff; border: 1px solid var(--border); border-radius: 9px; padding: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .route-path { background: #eef4ff; color: var(--navy); border: 1px solid #cfe0fb; border-radius: 9px; padding: 11px; text-align: center; font-weight: 700; margin-bottom: 15px; }
+        .incident-box { background: #f8fbff; border: 1px solid #cfe0fb; border-left: 4px solid var(--blue); border-radius: 10px; padding: 13px; margin: 10px 0; }
         .incident-details { margin-top: 5px; margin-bottom: 10px; font-style: italic; }
-        .officer-box { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #000; }
+        .officer-box { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #cbd5e1; color: var(--muted); }
         .flex-container { display: flex; gap: 20px; }
         .flex-child-1 { flex: 1; }
         .flex-child-2 { flex: 2; }
+        @media (max-width: 850px) { body { padding: 16px; } .grid { grid-template-columns: 1fr; } .flex-container { flex-direction: column; } .panel { overflow-x: auto; } }
     </style>
 </head>
 <body>
@@ -263,7 +270,7 @@ $json_landmarks = json_encode($js_district_matrix);
             </form>
             
             <?php if (isset($_GET['search_route'])): ?>
-                <hr style="margin-top:20px; border: 0; border-top: 1px solid #000;">
+                <hr style="margin-top:20px; border: 0; border-top: 1px solid #dbe3ef;">
                 
                 <div class="route-path">
                     Scanning Path: <?php echo implode(" -> ", $calculated_route); ?>

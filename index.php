@@ -71,13 +71,19 @@ if (isset($_POST['login'])) {
     <meta charset="UTF-8">
     <title>Traffic Management System - Gateway</title>
     <style>
-        body { font-family: sans-serif; background: #ffffff; color: #000000; display: flex; justify-content: center; gap: 50px; align-items: flex-start; padding-top: 100px; margin: 0; }
-        .card { border: 1px solid #000; padding: 20px; width: 320px; }
-        h2 { margin-top: 0; border-bottom: 1px solid #000; padding-bottom: 5px; }
-        input, select { width: 100%; padding: 8px; margin: 10px 0; border: 1px solid #000; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; background: #eeeeee; border: 1px solid #000; color: #000; cursor: pointer; font-weight: bold; }
-        .alert { border: 1px solid #000; padding: 10px; margin-bottom: 15px; font-weight: bold; }
-        .district-box { border: 1px dashed #000; padding: 10px; margin-top: 10px; }
+        :root { --navy: #12233f; --blue: #2563eb; --blue-dark: #1d4ed8; --bg: #f4f7fb; --card: #ffffff; --border: #dbe3ef; --text: #1f2937; --muted: #64748b; --danger-bg: #fff1f2; --danger: #be123c; }
+        * { box-sizing: border-box; }
+        body { font-family: Inter, Segoe UI, Arial, sans-serif; background: linear-gradient(135deg, #eef4ff, #f8fafc); color: var(--text); display: flex; justify-content: center; gap: 28px; align-items: flex-start; min-height: 100vh; padding: 64px 24px; margin: 0; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 12px 30px rgba(31, 56, 88, .10); padding: 30px; width: 360px; }
+        h2 { color: var(--navy); margin: 0 0 22px; padding-bottom: 14px; border-bottom: 1px solid var(--border); font-size: 1.35rem; }
+        input, select { width: 100%; padding: 11px 12px; margin: 9px 0; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: var(--text); outline: none; transition: border-color .2s, box-shadow .2s; }
+        input:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .13); }
+        button { width: 100%; padding: 11px 14px; margin-top: 8px; background: var(--blue); border: 0; border-radius: 8px; color: #fff; cursor: pointer; font-weight: 700; transition: background .2s, transform .2s; }
+        button:hover { background: var(--blue-dark); transform: translateY(-1px); }
+        .alert { background: var(--danger-bg); color: var(--danger); border: 1px solid #fecdd3; border-radius: 8px; padding: 11px 12px; margin-bottom: 16px; font-weight: 600; }
+        .district-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-top: 10px; }
+        label { color: var(--muted); font-size: .9rem; }
+        @media (max-width: 800px) { body { flex-direction: column; align-items: stretch; padding: 28px 16px; } .card { width: 100%; max-width: 520px; margin: 0 auto; } }
     </style>
 </head>
 <body>

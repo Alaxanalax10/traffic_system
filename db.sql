@@ -110,7 +110,31 @@ CREATE TABLE Reports (
 CREATE INDEX idx_reports_status ON Reports(status);
 
 INSERT INTO Districts (district_name) VALUES
-('Colombo'), ('Gampaha'), ('Kalutara'), ('Kandy'), ('Jaffna');
+('Colombo'),
+('Gampaha'),
+('Kalutara'),
+('Kandy'),
+('Matale'),
+('Nuwara Eliya'),
+('Galle'),
+('Matara'),
+('Hambantota'),
+('Jaffna'),
+('Kilinochchi'),
+('Mannar'),
+('Mullaitivu'),
+('Vavuniya'),
+('Batticaloa'),
+('Ampara'),
+('Trincomalee'),
+('Kurunegala'),
+('Puttalam'),
+('Anuradhapura'),
+('Polonnaruwa'),
+('Badulla'),
+('Monaragala'),
+('Ratnapura'),
+('Kegalle');
 
 INSERT INTO Users (user_id, name, email, password_hash, role, is_active)
 VALUES (

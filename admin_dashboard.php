@@ -174,21 +174,30 @@ $json_landmarks = json_encode($landmark_data);
     <meta charset="UTF-8">
     <title>Admin Dashboard</title>
     <style>
-        body { font-family: sans-serif; margin: 20px; background: #ffffff; color: #000000; }
-        .navbar { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
-        .navbar a { color: #000; text-decoration: none; border: 1px solid #000; padding: 5px 10px; }
-        .alert { border: 1px solid #000; padding: 10px; margin-bottom: 20px; font-weight: bold; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;}
-        .panel { border: 1px solid #000; padding: 15px; margin-bottom: 20px;}
-        h3, h4 { border-bottom: 1px solid #000; padding-bottom: 5px; margin-top: 0; }
-        label { font-weight: bold; display: block; margin-top: 15px; }
-        input, select { width: 100%; padding: 8px; margin: 5px 0 15px 0; border: 1px solid #000; box-sizing: border-box; }
-        button { background: #eeeeee; color: #000; border: 1px solid #000; padding: 8px 15px; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { padding: 8px; border: 1px solid #000; text-align: left; }
-        .badge-role { border: 1px dashed #000; padding: 2px 5px; font-size: 0.85em; }
+        :root { --navy: #12233f; --blue: #2563eb; --blue-dark: #1d4ed8; --bg: #f4f7fb; --card: #fff; --border: #dbe3ef; --text: #1f2937; --muted: #64748b; }
+        * { box-sizing: border-box; }
+        body { font-family: Inter, Segoe UI, Arial, sans-serif; margin: 0; padding: 28px; background: var(--bg); color: var(--text); }
+        .navbar { display: flex; justify-content: space-between; align-items: center; background: var(--navy); color: #fff; border-radius: 14px; padding: 18px 24px; margin-bottom: 24px; box-shadow: 0 8px 20px rgba(18, 35, 63, .16); }
+        .navbar h2 { margin: 0; font-size: 1.35rem; }
+        .navbar a { color: #fff; text-decoration: none; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 9px 14px; }
+        .navbar a:hover { background: rgba(255,255,255,.22); }
+        .alert { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; border-radius: 9px; padding: 12px 14px; margin-bottom: 20px; font-weight: 600; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 20px; box-shadow: 0 6px 18px rgba(31, 56, 88, .06); }
+        h3, h4 { color: var(--navy); border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-top: 0; }
+        label { color: var(--muted); font-weight: 700; display: block; margin-top: 15px; }
+        input, select { width: 100%; padding: 10px 12px; margin: 5px 0 15px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: var(--text); }
+        button { background: var(--blue); color: #fff; border: 0; border-radius: 8px; padding: 9px 15px; cursor: pointer; font-weight: 700; }
+        button:hover { background: var(--blue-dark); }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; margin-top: 15px; border: 1px solid var(--border); border-radius: 10px; }
+        th, td { padding: 11px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+        th { background: #eef4ff; color: var(--navy); font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; }
+        tr:last-child td { border-bottom: 0; }
+        tr:hover td { background: #f8fbff; }
+        .badge-role { background: #dbeafe; color: #1d4ed8; border: 0; border-radius: 999px; padding: 4px 9px; font-size: .8em; font-weight: 700; }
         .flex-container { display: flex; gap: 10px; margin-bottom: 20px; }
         .flex-child { flex: 1; }
+        @media (max-width: 850px) { body { padding: 16px; } .grid { grid-template-columns: 1fr; } .navbar { gap: 12px; } .panel { overflow-x: auto; } }
     </style>
 </head>
 <body>
@@ -232,7 +241,7 @@ $json_landmarks = json_encode($landmark_data);
         <p>Schedule officers for weekly patrol slots at registered district landmarks. Overlapping shifts for the same place are physically blocked by the system.</p>
         
         <div class="grid">
-            <div style="border: 1px dashed #000; padding: 15px;">
+            <div style="border: 1px solid #dbe3ef; background: #f8fafc; border-radius: 10px; padding: 15px;">
                 <h4 id="form_title">Assign New Duty Slot</h4>
                 <form method="POST" id="dutyForm">
                     <input type="hidden" name="schedule_id" id="edit_schedule_id" value="">
