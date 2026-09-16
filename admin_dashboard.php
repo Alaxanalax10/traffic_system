@@ -22,47 +22,64 @@ if (isset($_POST['save_duty'])) {
     $schedule_id = $_POST['schedule_id']; 
     $officer_id = $_POST['officer_id'];
     $landmark_id = $_POST['landmark_id'];
-    $day = $_POST['day_of_week'];
     $start = $_POST['start_time'];
     $end = $_POST['end_time'];
     
-    // 1. Strict Validation: District Match (Updated schemas)
+    // Convert to array in case only one day is selected or if multiple are selected
+    $days = isset($_POST['day_of_week']) ? (array)$_POST['day_of_week'] : [];
+    
+    // 1. Strict Validation: District Match
     $off_dist = $pdo->query("SELECT district FROM Users WHERE user_id = " . intval($officer_id))->fetchColumn();
     $land_dist = $pdo->query("SELECT district FROM Landmarks WHERE landmark_id = " . intval($landmark_id))->fetchColumn();
     
-    if ($off_dist !== $land_dist) {
+    if (empty($days)) {
+        $msg = "<div class='alert'>ERROR: Please select at least one day.</div>";
+    } elseif ($off_dist !== $land_dist) {
         $msg = "<div class='alert'>ASSIGNMENT BLOCKED: Officer belongs to <strong>$off_dist</strong> district. You cannot assign them to a place in <strong>$land_dist</strong>.</div>";
     } elseif ($start >= $end) {
         $msg = "<div class='alert'>INVALID TIME: Shift end time must be after the start time.</div>";
     } else {
-        // 2. Strict Validation: Overlap Detection
-        $overlap_query = "SELECT u.name FROM DutySchedules ds JOIN Users u ON ds.user_id = u.user_id 
-                          WHERE ds.landmark_id = ? AND ds.day_of_week = ? 
-                          AND ds.start_time < ? AND ds.end_time > ?";
-        $params = [$landmark_id, $day, $end, $start];
         
-        if (!empty($schedule_id)) {
-            $overlap_query .= " AND ds.schedule_id != ?";
-            $params[] = $schedule_id;
+        // 2. Strict Validation: Overlap Detection for Multiple Days
+        $conflicts = [];
+        foreach ($days as $day) {
+            $overlap_query = "SELECT u.name FROM DutySchedules ds JOIN Users u ON ds.user_id = u.user_id 
+                              WHERE ds.landmark_id = ? AND ds.day_of_week = ? 
+                              AND ds.start_time < ? AND ds.end_time > ?";
+            $params = [$landmark_id, $day, $end, $start];
+            
+            // If editing an existing schedule, exclude it from overlap checks
+            if (!empty($schedule_id)) {
+                $overlap_query .= " AND ds.schedule_id != ?";
+                $params[] = $schedule_id;
+            }
+            
+            $stmt = $pdo->prepare($overlap_query);
+            $stmt->execute($params);
+            $conflict_officer = $stmt->fetchColumn();
+            
+            if ($conflict_officer) {
+                $conflicts[] = "<strong>$day</strong> (Assigned to $conflict_officer)";
+            }
         }
         
-        $stmt = $pdo->prepare($overlap_query);
-        $stmt->execute($params);
-        $conflict_officer = $stmt->fetchColumn();
-        
-        if ($conflict_officer) {
-            $msg = "<div class='alert'>CONFLICT: The system blocked this assignment because Officer <strong>$conflict_officer</strong> is already guarding this location during that time block.</div>";
+        if (!empty($conflicts)) {
+            $msg = "<div class='alert'>CONFLICT: The system blocked this assignment. Overlaps detected on:<br>" . implode("<br>", $conflicts) . "</div>";
         } else {
-            // 3. Execution (Insert or Update)
-            if (empty($schedule_id)) {
-                $pdo->prepare("INSERT INTO DutySchedules (user_id, landmark_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?, ?)")
-                    ->execute([$officer_id, $landmark_id, $day, $start, $end]);
-                $msg = "<div class='alert'>Sector patrol duty published successfully.</div>";
-            } else {
-                $pdo->prepare("UPDATE DutySchedules SET user_id = ?, landmark_id = ?, day_of_week = ?, start_time = ?, end_time = ? WHERE schedule_id = ?")
-                    ->execute([$officer_id, $landmark_id, $day, $start, $end, $schedule_id]);
-                $msg = "<div class='alert'>Shift modified and updated successfully.</div>";
+            // 3. Execution (Insert Multiple Rows)
+            
+            // If we are modifying an existing shift and they changed the day (or added more), 
+            // the safest way is to delete the original single shift row and insert the new ones.
+            if (!empty($schedule_id)) {
+                $pdo->prepare("DELETE FROM DutySchedules WHERE schedule_id = ?")->execute([$schedule_id]);
             }
+            
+            $insert_stmt = $pdo->prepare("INSERT INTO DutySchedules (user_id, landmark_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?, ?)");
+            foreach ($days as $day) {
+                $insert_stmt->execute([$officer_id, $landmark_id, $day, $start, $end]);
+            }
+            
+            $msg = "<div class='alert'>Duty shift(s) saved successfully.</div>";
         }
     }
 }
@@ -106,7 +123,6 @@ if (isset($_POST['admin_delete_vehicle'])) {
 if (isset($_POST['delete_user'])) {
     $t_id = $_POST['target_user_id'];
     
-    // Security Patch: Used Prepared Statements for deletions
     $pdo->prepare("DELETE FROM DutySchedules WHERE user_id = ?")->execute([$t_id]);
     $pdo->prepare("DELETE FROM Reports WHERE reporter_id = ?")->execute([$t_id]);
     $pdo->prepare("DELETE FROM Vehicles WHERE user_id = ?")->execute([$t_id]); 
@@ -235,9 +251,9 @@ $json_landmarks = json_encode($landmark_data);
                         <option value="">-- Select Officer First --</option>
                     </select>
                     
-                    <label>Day of the Week</label>
-                    <select name="day_of_week" id="sel_day" required>
-                        <option value="">-- Select Day --</option>
+                    <label>Day(s) of the Week <small>(Hold CTRL or CMD to select multiple)</small></label>
+                    <!-- UPDATED: Added name="[]", multiple attribute, and height for visibility -->
+                    <select name="day_of_week[]" id="sel_day" multiple required style="height: 140px;">
                         <?php foreach($days_of_week as $day) echo "<option value='$day'>$day</option>"; ?>
                     </select>
                     
@@ -257,7 +273,7 @@ $json_landmarks = json_encode($landmark_data);
                 </form>
             </div>
             
-            <div style="overflow-y: auto; max-height: 450px;">
+            <div style="overflow-y: auto; max-height: 520px;">
                 <table style="margin-top:0;">
                     <tr><th>Officer</th><th>Location</th><th>Shift Window</th><th>Manage</th></tr>
                     <?php if (empty($schedules)): ?>
@@ -425,7 +441,12 @@ $json_landmarks = json_encode($landmark_data);
         document.getElementById('sel_officer').value = officer_id;
         filterLandmarks(landmark_id);
         
-        document.getElementById('sel_day').value = day_of_week;
+        // Handle selecting the correct day in the new multi-select box
+        let selDay = document.getElementById('sel_day');
+        for(let i = 0; i < selDay.options.length; i++) {
+            selDay.options[i].selected = (selDay.options[i].value === day_of_week);
+        }
+        
         document.getElementById('sel_start').value = start_time;
         document.getElementById('sel_end').value = end_time;
         
