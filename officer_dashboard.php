@@ -26,12 +26,28 @@ if (isset($_POST['update_status'])) {
 
 // B. Issue Citation
 if (isset($_POST['issue_ticket'])) {
-    $vehicle_plate = strtoupper(trim($_POST['vehicle_plate'])); 
+    $target_type = $_POST['target_type'] ?? 'vehicle';
     $violation_id = $_POST['violation_id'];
-    
-    $stmt = $pdo->prepare("INSERT INTO Fines (vehicle_plate, violation_id, officer_id) VALUES (?, ?, ?)");
-    $stmt->execute([$vehicle_plate, $violation_id, $officer_id]);
-    $msg = "<div class='alert'>Citation attached to vehicle <strong>$vehicle_plate</strong>. If unregistered, it will link automatically when the owner makes an account.</div>";
+
+    if ($target_type === 'user') {
+        $target_user_id = $_POST['target_user_id'];
+        $stmt = $pdo->prepare("INSERT INTO Fines (user_id, violation_id, officer_id) VALUES (?, ?, ?)");
+        $stmt->execute([$target_user_id, $violation_id, $officer_id]);
+        $msg = "<div class='alert'>Citation issued directly to the selected user.</div>";
+    } else {
+        $vehicle_plate = strtoupper(trim($_POST['vehicle_plate']));
+        $vehicle_stmt = $pdo->prepare("SELECT license_plate, user_id FROM Vehicles WHERE license_plate = ?");
+        $vehicle_stmt->execute([$vehicle_plate]);
+        $vehicle = $vehicle_stmt->fetch();
+
+        if (!$vehicle) {
+            $msg = "<div class='alert'>The selected vehicle is not registered.</div>";
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO Fines (vehicle_plate, user_id, violation_id, officer_id) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$vehicle['license_plate'], $vehicle['user_id'], $violation_id, $officer_id]);
+            $msg = "<div class='alert'>Citation attached to vehicle <strong>" . htmlspecialchars($vehicle_plate) . "</strong>.</div>";
+        }
+    }
 }
 
 // ==========================================
@@ -92,6 +108,7 @@ if ($active_duty) {
 
 $violations = $pdo->query("SELECT * FROM Violations")->fetchAll();
 $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Vehicles ORDER BY license_plate ASC")->fetchAll();
+$registered_users = $pdo->query("SELECT user_id, name, email FROM Users WHERE role = 'Citizen' AND is_active = 1 ORDER BY name")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -143,16 +160,35 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
             <div class="panel">
                 <h3>Issue Traffic Citation</h3>
                 <form method="POST">
-                    
-                    <label>Vehicle License Plate (Type new or select from list)</label>
-                    <input list="plate_list" name="vehicle_plate" placeholder="e.g. WP CAA-1234" required autocomplete="off">
-                    <datalist id="plate_list">
-                        <?php foreach($registered_vehicles as $rv): ?>
-                            <option value="<?php echo htmlspecialchars($rv['license_plate']); ?>">
-                                <?php echo htmlspecialchars($rv['vehicle_model']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </datalist>
+                    <label>Fine Target</label>
+                    <select name="target_type" id="target_type" onchange="toggleFineTarget()" required>
+                        <option value="vehicle">Vehicle</option>
+                        <option value="user">User</option>
+                    </select>
+
+                    <div id="vehicle_target">
+                        <label>Vehicle License Plate</label>
+                        <input list="plate_list" name="vehicle_plate" placeholder="e.g. WP CAA-1234" autocomplete="off">
+                        <datalist id="plate_list">
+                            <?php foreach($registered_vehicles as $rv): ?>
+                                <option value="<?php echo htmlspecialchars($rv['license_plate']); ?>">
+                                    <?php echo htmlspecialchars($rv['vehicle_model']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </datalist>
+                    </div>
+
+                    <div id="user_target" style="display:none;">
+                        <label>User</label>
+                        <select name="target_user_id">
+                            <option value="">-- Select User --</option>
+                            <?php foreach($registered_users as $registered_user): ?>
+                                <option value="<?php echo htmlspecialchars($registered_user['user_id']); ?>">
+                                    <?php echo htmlspecialchars($registered_user['name']); ?> (<?php echo htmlspecialchars($registered_user['email']); ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
                     
                     <label>Violation Type</label>
                     <select name="violation_id" required>
@@ -280,5 +316,20 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
         </div>
     </div>
 </div>
+<script>
+    function toggleFineTarget() {
+        const targetType = document.getElementById('target_type').value;
+        const vehicleTarget = document.getElementById('vehicle_target');
+        const userTarget = document.getElementById('user_target');
+        const vehicleInput = document.querySelector('#vehicle_target input[name="vehicle_plate"]');
+        const userSelect = document.querySelector('#user_target select[name="target_user_id"]');
+        const isUser = targetType === 'user';
+
+        vehicleTarget.style.display = isUser ? 'none' : 'block';
+        userTarget.style.display = isUser ? 'block' : 'none';
+        vehicleInput.required = !isUser;
+        userSelect.required = isUser;
+    }
+</script>
 </body>
 </html>

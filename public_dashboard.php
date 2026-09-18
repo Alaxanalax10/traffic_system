@@ -139,8 +139,8 @@ $vehicles = $pdo->prepare("SELECT * FROM Vehicles WHERE user_id = ? ORDER BY reg
 $vehicles->execute([$user_id]); 
 $vehicles = $vehicles->fetchAll();
 
-$my_fines = $pdo->prepare("SELECT f.*, v.violation_name, v.fine_amount FROM Fines f JOIN Violations v ON f.violation_id = v.violation_id WHERE f.vehicle_plate IN (SELECT license_plate FROM Vehicles WHERE user_id = ?) ORDER BY f.status DESC, f.issued_date DESC");
-$my_fines->execute([$user_id]); 
+$my_fines = $pdo->prepare("SELECT f.*, v.violation_name, v.fine_amount FROM Fines f JOIN Violations v ON f.violation_id = v.violation_id WHERE f.user_id = ? OR f.vehicle_plate IN (SELECT license_plate FROM Vehicles WHERE user_id = ?) ORDER BY f.status DESC, f.issued_date DESC");
+$my_fines->execute([$user_id, $user_id]);
 $my_fines = $my_fines->fetchAll();
 
 $districts = $pdo->query("SELECT district_id, district_name FROM Districts ORDER BY district_name")->fetchAll();
@@ -238,10 +238,10 @@ $json_landmarks = json_encode($js_district_matrix);
                     <p>No fines detected.</p>
                 <?php else: ?>
                     <table>
-                        <tr><th>Plate</th><th>Violation</th><th>Date</th><th>Amount</th><th>Status</th></tr>
+                        <tr><th>Target</th><th>Violation</th><th>Date</th><th>Amount</th><th>Status</th></tr>
                         <?php foreach($my_fines as $fine): ?>
                         <tr>
-                            <td><strong><?php echo htmlspecialchars($fine['vehicle_plate']); ?></strong></td>
+                            <td><strong><?php echo htmlspecialchars($fine['vehicle_plate'] ?: 'Direct user fine'); ?></strong></td>
                             <td><?php echo htmlspecialchars($fine['violation_name']); ?></td>
                             <td><?php echo date('M d', strtotime($fine['issued_date'])); ?></td>
                             <td>Rs. <?php echo number_format($fine['fine_amount'], 2); ?></td>

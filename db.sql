@@ -73,13 +73,15 @@ CREATE TABLE Violations (
 
 CREATE TABLE Fines (
     fine_id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
-    vehicle_plate VARCHAR(20) NOT NULL,
+    vehicle_plate VARCHAR(20) DEFAULT NULL,
+    user_id CHAR(36) DEFAULT NULL,
     violation_id INT NOT NULL,
     officer_id CHAR(36) NOT NULL,
     status ENUM('Unpaid', 'Paid', 'Appealed', 'Overdue') DEFAULT 'Unpaid',
     issued_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (vehicle_plate) REFERENCES Vehicles(license_plate) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE,
     FOREIGN KEY (violation_id) REFERENCES Violations(violation_id) ON DELETE RESTRICT,
     FOREIGN KEY (officer_id) REFERENCES Officers(officer_id) ON DELETE CASCADE
 );
