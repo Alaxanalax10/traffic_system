@@ -132,11 +132,41 @@ if (isset($_POST['update_report_status'])) {
     $report_statuses = ['Pending', 'Investigating', 'Resolved', 'Dismissed'];
     $report_id = $_POST['report_id'];
     $new_status = $_POST['status'];
+    $investigator_id = trim($_POST['investigator_id'] ?? '');
+    $investigator_id = $investigator_id === '' ? null : $investigator_id;
 
     if (in_array($new_status, $report_statuses, true)) {
-        $pdo->prepare("UPDATE Reports SET status = ? WHERE report_id = ?")
-            ->execute([$new_status, $report_id]);
-        $msg = "<div class='alert'>Hazard report status updated.</div>";
+        $pdo->prepare("UPDATE Reports SET status = ?, investigator_id = ? WHERE report_id = ?")
+            ->execute([$new_status, $investigator_id, $report_id]);
+        $msg = "<div class='alert'>Hazard report management details updated.</div>";
+    }
+}
+if (isset($_POST['add_violation'])) {
+    $violation_name = trim($_POST['violation_name']);
+    $fine_amount = filter_var($_POST['fine_amount'], FILTER_VALIDATE_FLOAT);
+
+    if ($violation_name !== '' && $fine_amount !== false && $fine_amount >= 0) {
+        $pdo->prepare("INSERT INTO Violations (violation_name, fine_amount) VALUES (?, ?)")
+            ->execute([$violation_name, $fine_amount]);
+        $msg = "<div class='alert'>Violation added.</div>";
+    }
+}
+if (isset($_POST['edit_violation'])) {
+    $violation_name = trim($_POST['violation_name']);
+    $fine_amount = filter_var($_POST['fine_amount'], FILTER_VALIDATE_FLOAT);
+
+    if ($violation_name !== '' && $fine_amount !== false && $fine_amount >= 0) {
+        $pdo->prepare("UPDATE Violations SET violation_name = ?, fine_amount = ? WHERE violation_id = ?")
+            ->execute([$violation_name, $fine_amount, $_POST['violation_id']]);
+        $msg = "<div class='alert'>Violation updated.</div>";
+    }
+}
+if (isset($_POST['delete_violation'])) {
+    try {
+        $pdo->prepare("DELETE FROM Violations WHERE violation_id = ?")->execute([$_POST['violation_id']]);
+        $msg = "<div class='alert'>Violation removed.</div>";
+    } catch (PDOException $e) {
+        $msg = "<div class='alert'>This violation cannot be removed because it is used by an existing fine.</div>";
     }
 }
 if (isset($_POST['admin_delete_vehicle'])) {
@@ -171,8 +201,9 @@ $schedules = $pdo->query("
 
 $all_users = $pdo->query("SELECT u.user_id, u.name, u.email, u.role, o.is_approved, d.district_name FROM Users u LEFT JOIN Officers o ON o.officer_id = u.user_id LEFT JOIN Districts d ON d.district_id = u.district_id WHERE u.role IN ('Officer', 'Citizen') ORDER BY u.role, u.name")->fetchAll();
 $all_vehicles = $pdo->query("SELECT v.license_plate, v.vehicle_model, v.registered_date, u.name AS owner_name, u.email FROM Vehicles v JOIN Users u ON v.user_id = u.user_id ORDER BY v.registered_date DESC")->fetchAll();
+$all_violations = $pdo->query("SELECT violation_id, violation_name, fine_amount FROM Violations ORDER BY violation_name")->fetchAll();
 $hazard_reports = $pdo->query("
-    SELECT r.report_id, r.hazard_type, r.description, r.status, r.created_at, r.updated_at,
+    SELECT r.report_id, r.hazard_type, r.description, r.status, r.investigator_id, r.created_at, r.updated_at,
            d.district_name,
            reporter.name AS reporter_name, reporter.email AS reporter_email,
            investigator.name AS investigator_name
@@ -450,11 +481,62 @@ $json_landmarks = json_encode($landmark_data);
                                         <option value="<?php echo $status; ?>" <?php echo $report['status'] === $status ? 'selected' : ''; ?>><?php echo $status; ?></option>
                                     <?php endforeach; ?>
                                 </select>
+                                <select name="investigator_id" style="margin:0 0 6px 0; min-width: 145px;" aria-label="Assign investigator">
+                                    <option value="">No investigator</option>
+                                    <?php foreach ($active_officers as $officer): ?>
+                                        <option value="<?php echo htmlspecialchars($officer['user_id']); ?>" <?php echo $report['investigator_id'] === $officer['user_id'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($officer['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
                                 <button type="submit" name="update_report_status">Update Status</button>
                             </form>
                             <form method="POST" onsubmit="return confirm('Delete this hazard report permanently?');">
                                 <input type="hidden" name="report_id" value="<?php echo htmlspecialchars($report['report_id']); ?>">
                                 <button type="submit" name="delete_report" style="background:#be123c;">Delete Report</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Traffic Violation Management</h3>
+        <p class="report-meta">Create and maintain the violation types and fine amounts used when officers issue citations.</p>
+        <form method="POST" class="flex-container" style="align-items: flex-end;">
+            <div style="flex:2;">
+                <label>Violation Name</label>
+                <input type="text" name="violation_name" placeholder="e.g. Driving in a Bus Lane" required style="margin:0;">
+            </div>
+            <div style="flex:1;">
+                <label>Fine Amount (Rs.)</label>
+                <input type="number" name="fine_amount" min="0" step="0.01" placeholder="5000.00" required style="margin:0;">
+            </div>
+            <button type="submit" name="add_violation" style="margin:0;">Add Violation</button>
+        </form>
+        <div style="overflow-x: auto;">
+            <table>
+                <tr><th>Violation</th><th>Fine Amount</th><th>Actions</th></tr>
+                <?php if (empty($all_violations)): ?>
+                    <tr><td colspan="3">No violations configured.</td></tr>
+                <?php else: ?>
+                    <?php foreach ($all_violations as $violation): ?>
+                    <tr>
+                        <td colspan="2">
+                            <form method="POST" class="flex-container" style="align-items:center; margin:0;">
+                                <input type="hidden" name="violation_id" value="<?php echo $violation['violation_id']; ?>">
+                                <input type="text" name="violation_name" value="<?php echo htmlspecialchars($violation['violation_name']); ?>" required style="flex:2; margin:0;">
+                                <input type="number" name="fine_amount" value="<?php echo htmlspecialchars($violation['fine_amount']); ?>" min="0" step="0.01" required style="flex:1; margin:0;">
+                                <button type="submit" name="edit_violation">Save</button>
+                            </form>
+                        </td>
+                        <td>
+                            <form method="POST" onsubmit="return confirm('Delete this violation type?');">
+                                <input type="hidden" name="violation_id" value="<?php echo $violation['violation_id']; ?>">
+                                <button type="submit" name="delete_violation" style="background:#be123c;">Delete</button>
                             </form>
                         </td>
                     </tr>
