@@ -72,6 +72,15 @@ if (isset($_POST['remove_vehicle'])) {
     $msg = "<div class='alert'>Vehicle removed from your garage.</div>";
 }
 
+if (isset($_POST['edit_vehicle'])) {
+    $vehicle_model = trim($_POST['vehicle_model']);
+    if ($vehicle_model !== '') {
+        $pdo->prepare("UPDATE Vehicles SET vehicle_model = ? WHERE license_plate = ? AND user_id = ?")
+            ->execute([$vehicle_model, $_POST['vehicle_plate'], $user_id]);
+        $msg = "<div class='alert'>Vehicle details updated.</div>";
+    }
+}
+
 if (isset($_POST['pay_fine'])) {
     $fine_id = $_POST['fine_id'];
     $pdo->beginTransaction();
@@ -150,7 +159,7 @@ $json_landmarks = json_encode($js_district_matrix);
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Citizen Command Center</title>
+    <title>Public Dashboard</title>
     <style>
         :root { --navy: #12233f; --blue: #2563eb; --blue-dark: #1d4ed8; --bg: #f4f7fb; --card: #fff; --border: #dbe3ef; --text: #1f2937; --muted: #64748b; }
         * { box-sizing: border-box; }
@@ -185,14 +194,14 @@ $json_landmarks = json_encode($js_district_matrix);
 
 <div class="navbar">
     <h2>Welcome, <?php echo htmlspecialchars($_SESSION['user_name']); ?></h2>
-    <a href="logout.php">Secure System Signout</a>
+    <a href="logout.php">Logout</a>
 </div>
 
 <div>
     <?php if($msg) echo $msg; ?>
 
     <div class="panel" style="margin-bottom: 20px;">
-        <h3>Digital Fine & Vehicle Portal</h3>
+        <h3>Vehicle Management and Fines</h3>
         <div class="flex-container">
             <div class="flex-child-1">
                 <h4>Add Vehicle</h4>
@@ -208,7 +217,11 @@ $json_landmarks = json_encode($js_district_matrix);
                         <li class="list-item">
                             <div>
                                 <strong><?php echo htmlspecialchars($v['license_plate']); ?></strong><br>
-                                <small><?php echo htmlspecialchars($v['vehicle_model']); ?></small>
+                                <form method="POST" style="display:flex; gap:8px; margin-top:8px;">
+                                    <input type="hidden" name="vehicle_plate" value="<?php echo htmlspecialchars($v['license_plate']); ?>">
+                                    <input type="text" name="vehicle_model" value="<?php echo htmlspecialchars($v['vehicle_model']); ?>" required aria-label="Vehicle model" style="margin:0; min-width:150px;">
+                                    <button type="submit" name="edit_vehicle">Save</button>
+                                </form>
                             </div>
                             <form method="POST" onsubmit="return confirm('Remove this vehicle?');" style="margin:0;">
                                 <input type="hidden" name="remove_plate" value="<?php echo htmlspecialchars($v['license_plate']); ?>">
@@ -323,10 +336,10 @@ $json_landmarks = json_encode($js_district_matrix);
                     <option value="">-- Select District First --</option>
                 </select>
                 
-                <label>Exact Location Description</label>
+                <label>Exact Description</label>
                 <textarea name="description" rows="3" placeholder="e.g. 200m north side from town crossing..." required></textarea>
                 
-                <button type="submit" name="report_issue" style="width: 100%;">Dispatch Exact Location Alert</button>
+                <button type="submit" name="report_issue" style="width: 100%;">Add Hazard Alert</button>
             </form>
         </div>
     </div>

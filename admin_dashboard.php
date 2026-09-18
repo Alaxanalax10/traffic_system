@@ -109,6 +109,14 @@ if (isset($_POST['add_landmark'])) {
     $pdo->prepare("INSERT INTO Landmarks (district_id, landmark_name) VALUES (?, ?)")->execute([(int)$_POST['district'], trim($_POST['landmark_name'])]);
     $msg = "<div class='alert'>Landmark added.</div>";
 }
+if (isset($_POST['edit_landmark'])) {
+    $landmark_name = trim($_POST['landmark_name']);
+    if ($landmark_name !== '') {
+        $pdo->prepare("UPDATE Landmarks SET landmark_name = ? WHERE landmark_id = ?")
+            ->execute([$landmark_name, $_POST['landmark_id']]);
+        $msg = "<div class='alert'>Landmark updated.</div>";
+    }
+}
 if (isset($_POST['delete_landmark'])) {
     $pdo->prepare("DELETE FROM DutySchedules WHERE landmark_id = ?")->execute([$_POST['landmark_id']]);
     $pdo->prepare("DELETE FROM Landmarks WHERE landmark_id = ?")->execute([$_POST['landmark_id']]);
@@ -119,6 +127,17 @@ if (isset($_POST['delete_landmark'])) {
 if (isset($_POST['delete_report'])) {
     $pdo->prepare("DELETE FROM Reports WHERE report_id = ?")->execute([$_POST['report_id']]);
     $msg = "<div class='alert'>False report purged.</div>";
+}
+if (isset($_POST['update_report_status'])) {
+    $report_statuses = ['Pending', 'Investigating', 'Resolved', 'Dismissed'];
+    $report_id = $_POST['report_id'];
+    $new_status = $_POST['status'];
+
+    if (in_array($new_status, $report_statuses, true)) {
+        $pdo->prepare("UPDATE Reports SET status = ? WHERE report_id = ?")
+            ->execute([$new_status, $report_id]);
+        $msg = "<div class='alert'>Hazard report status updated.</div>";
+    }
 }
 if (isset($_POST['admin_delete_vehicle'])) {
     $pdo->prepare("DELETE FROM Vehicles WHERE license_plate = ?")->execute([$_POST['target_plate']]);
@@ -152,6 +171,18 @@ $schedules = $pdo->query("
 
 $all_users = $pdo->query("SELECT u.user_id, u.name, u.email, u.role, o.is_approved, d.district_name FROM Users u LEFT JOIN Officers o ON o.officer_id = u.user_id LEFT JOIN Districts d ON d.district_id = u.district_id WHERE u.role IN ('Officer', 'Citizen') ORDER BY u.role, u.name")->fetchAll();
 $all_vehicles = $pdo->query("SELECT v.license_plate, v.vehicle_model, v.registered_date, u.name AS owner_name, u.email FROM Vehicles v JOIN Users u ON v.user_id = u.user_id ORDER BY v.registered_date DESC")->fetchAll();
+$hazard_reports = $pdo->query("
+    SELECT r.report_id, r.hazard_type, r.description, r.status, r.created_at, r.updated_at,
+           d.district_name,
+           reporter.name AS reporter_name, reporter.email AS reporter_email,
+           investigator.name AS investigator_name
+    FROM Reports r
+    JOIN Districts d ON d.district_id = r.district_id
+    JOIN Users reporter ON reporter.user_id = r.reporter_id
+    LEFT JOIN Officers assigned_officer ON assigned_officer.officer_id = r.investigator_id
+    LEFT JOIN Users investigator ON investigator.user_id = assigned_officer.officer_id
+    ORDER BY FIELD(r.status, 'Pending', 'Investigating', 'Resolved', 'Dismissed'), r.created_at DESC
+")->fetchAll();
 
 // Prepare JSON for Javascript Dynamic Filtering
 $officer_data = [];
@@ -195,6 +226,13 @@ $json_landmarks = json_encode($landmark_data);
         tr:last-child td { border-bottom: 0; }
         tr:hover td { background: #f8fbff; }
         .badge-role { background: #dbeafe; color: #1d4ed8; border: 0; border-radius: 999px; padding: 4px 9px; font-size: .8em; font-weight: 700; }
+        .status-badge { display: inline-block; border-radius: 999px; padding: 4px 9px; font-size: .78em; font-weight: 700; white-space: nowrap; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-investigating { background: #dbeafe; color: #1d4ed8; }
+        .status-resolved { background: #dcfce7; color: #166534; }
+        .status-dismissed { background: #f1f5f9; color: #475569; }
+        .report-description { min-width: 260px; max-width: 420px; white-space: pre-line; color: #475569; }
+        .report-meta { color: var(--muted); font-size: .85rem; line-height: 1.5; }
         .flex-container { display: flex; gap: 10px; margin-bottom: 20px; }
         .flex-child { flex: 1; }
         @media (max-width: 850px) { body { padding: 16px; } .grid { grid-template-columns: 1fr; } .navbar { gap: 12px; } .panel { overflow-x: auto; } }
@@ -203,7 +241,7 @@ $json_landmarks = json_encode($landmark_data);
 <body>
 
 <div class="navbar">
-    <h2>Admin Master Control</h2>
+    <h2>Admin Panel</h2>
     <a href="logout.php">Logout</a>
 </div>
 
@@ -219,7 +257,7 @@ $json_landmarks = json_encode($landmark_data);
             <tr>
                 <td><strong><?php echo htmlspecialchars($po['name']); ?></strong></td>
                 <td><?php echo htmlspecialchars($po['email']); ?></td>
-                <td>[<?php echo htmlspecialchars($po['district_name'] ?? 'N/A'); ?>]</td>
+                <td><?php echo htmlspecialchars($po['district_name'] ?? 'N/A'); ?></td>
                 <td>
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="target_id" value="<?php echo $po['user_id']; ?>">
@@ -237,7 +275,7 @@ $json_landmarks = json_encode($landmark_data);
     <?php endif; ?>
 
     <div class="panel">
-        <h3>Official Duty Roster Management</h3>
+        <h3>Officer Duty Management</h3>
         <p>Schedule officers for weekly patrol slots at registered district landmarks. Overlapping shifts for the same place are physically blocked by the system.</p>
         
         <div class="grid">
@@ -278,7 +316,7 @@ $json_landmarks = json_encode($landmark_data);
                         </div>
                     </div>
                     
-                    <button type="submit" name="save_duty" id="btn_save" style="width: 100%;">Publish Shift</button>
+                    <button type="submit" name="save_duty" id="btn_save" style="width: 100%;">Publish</button>
                     <button type="button" id="btn_cancel" onclick="cancelEdit()" style="width: 100%; margin-top: 10px; display: none;">Cancel Edit</button>
                 </form>
             </div>
@@ -293,7 +331,7 @@ $json_landmarks = json_encode($landmark_data);
                         <tr>
                             <td>
                                 <strong><?php echo htmlspecialchars($s['officer_name']); ?></strong><br>
-                                <small><?php echo htmlspecialchars($s['district_name']); ?> Dist.</small>
+                                <small><?php echo htmlspecialchars($s['district_name']); ?></small>
                             </td>
                             <td><strong><?php echo htmlspecialchars($s['landmark_name']); ?></strong></td>
                             <td>
@@ -337,14 +375,20 @@ $json_landmarks = json_encode($landmark_data);
 
         <div style="max-height: 250px; overflow-y: auto;">
             <table style="margin-top: 0;">
-                <tr><th>District</th><th>Landmark Town</th><th>Delete</th></tr>
+                <tr><th>District</th><th>Landmark Town</th><th>Actions</th></tr>
                 <?php if (empty($all_landmarks)): ?>
                     <tr><td colspan="3">No landmarks added yet.</td></tr>
                 <?php else: ?>
                     <?php foreach($all_landmarks as $l): ?>
                     <tr>
                         <td><?php echo htmlspecialchars($l['district_name']); ?></td>
-                        <td><strong><?php echo htmlspecialchars($l['landmark_name']); ?></strong></td>
+                        <td>
+                            <form method="POST" style="display:flex; gap:8px; margin:0;">
+                                <input type="hidden" name="landmark_id" value="<?php echo $l['landmark_id']; ?>">
+                                <input type="text" name="landmark_name" value="<?php echo htmlspecialchars($l['landmark_name']); ?>" required style="margin:0; min-width:180px;">
+                                <button type="submit" name="edit_landmark">Save</button>
+                            </form>
+                        </td>
                         <td>
                             <form method="POST" style="margin:0;">
                                 <input type="hidden" name="landmark_id" value="<?php echo $l['landmark_id']; ?>">
@@ -359,7 +403,69 @@ $json_landmarks = json_encode($landmark_data);
     </div>
 
     <div class="panel">
-        <h3>Global Vehicle Registry</h3>
+        <h3>Reported Hazards & Incident Management</h3>
+        <p class="report-meta">Review every citizen report, monitor its progress, and keep the response status up to date.</p>
+        <div style="overflow-x: auto;">
+            <table>
+                <tr>
+                    <th>Hazard</th>
+                    <th>Location / Details</th>
+                    <th>Reporter</th>
+                    <th>Status</th>
+                    <th>Investigator</th>
+                    <th>Reported</th>
+                    <th>Actions</th>
+                </tr>
+                <?php if (empty($hazard_reports)): ?>
+                    <tr><td colspan="7">No hazard reports have been submitted.</td></tr>
+                <?php else: ?>
+                    <?php foreach ($hazard_reports as $report): ?>
+                    <?php $status_class = 'status-' . strtolower($report['status']); ?>
+                    <?php
+                    $report_landmark = 'Not specified';
+                    if (preg_match('/^Location:\s*(.+?)(?:\R|$)/', $report['description'], $location_match)) {
+                        $report_landmark = trim($location_match[1]);
+                    }
+                    $report_details = preg_replace('/^Location:\s*.+?(?:\R|$)/', '', $report['description']);
+                    ?>
+                    <tr>
+                        <td><strong><?php echo htmlspecialchars($report['hazard_type']); ?></strong></td>
+                        <td class="report-description">
+                        <strong><?php echo htmlspecialchars($report['district_name']); ?> District</strong><br>
+                        <span class="report-meta">Landmark: <?php echo htmlspecialchars($report_landmark); ?></span><br>
+                        <?php echo htmlspecialchars(trim($report_details)); ?>
+                        </td>
+                        <td>
+                            <strong><?php echo htmlspecialchars($report['reporter_name']); ?></strong><br>
+                            <small class="report-meta"><?php echo htmlspecialchars($report['reporter_email']); ?></small>
+                        </td>
+                        <td><span class="status-badge <?php echo $status_class; ?>"><?php echo htmlspecialchars($report['status']); ?></span></td>
+                        <td><?php echo htmlspecialchars($report['investigator_name'] ?? 'Not assigned'); ?></td>
+                        <td class="report-meta"><?php echo date('M d, Y', strtotime($report['created_at'])); ?><br><?php echo date('g:i A', strtotime($report['created_at'])); ?></td>
+                        <td>
+                            <form method="POST" style="margin-bottom: 8px;">
+                                <input type="hidden" name="report_id" value="<?php echo htmlspecialchars($report['report_id']); ?>">
+                                <select name="status" style="margin:0 0 6px 0; min-width: 145px;" aria-label="Update hazard status">
+                                    <?php foreach (['Pending', 'Investigating', 'Resolved', 'Dismissed'] as $status): ?>
+                                        <option value="<?php echo $status; ?>" <?php echo $report['status'] === $status ? 'selected' : ''; ?>><?php echo $status; ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit" name="update_report_status">Update Status</button>
+                            </form>
+                            <form method="POST" onsubmit="return confirm('Delete this hazard report permanently?');">
+                                <input type="hidden" name="report_id" value="<?php echo htmlspecialchars($report['report_id']); ?>">
+                                <button type="submit" name="delete_report" style="background:#be123c;">Delete Report</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Users Vehicle Management</h3>
         <div style="overflow-x: auto;">
             <table>
                 <tr><th>License Plate</th><th>Vehicle Model</th><th>Registered Owner</th><th>Date Added</th><th>Admin Action</th></tr>
@@ -372,7 +478,7 @@ $json_landmarks = json_encode($landmark_data);
                     <td>
                         <form method="POST" onsubmit="return confirm('WARNING: Are you sure you want to delete this vehicle from the owner\'s registry?');">
                             <input type="hidden" name="target_plate" value="<?php echo htmlspecialchars($v['license_plate']); ?>">
-                            <button type="submit" name="admin_delete_vehicle">Override Delete</button>
+                            <button type="submit" name="admin_delete_vehicle">Delete</button>
                         </form>
                     </td>
                 </tr>
@@ -382,23 +488,22 @@ $json_landmarks = json_encode($landmark_data);
     </div>
 
     <div class="panel">
-        <h3>Global Account Management</h3>
+        <h3>User Account Management</h3>
         <div style="overflow-x: auto;">
             <table>
-                <tr><th>ID</th><th>Full Name</th><th>Email</th><th>Role</th><th>Action</th></tr>
+                <tr><th>Full Name</th><th>Email</th><th>Role</th><th>Action</th></tr>
                 <?php foreach ($all_users as $u): ?>
                 <tr>
-                    <td>#<?php echo $u['user_id']; ?></td>
                     <td><strong><?php echo htmlspecialchars($u['name']); ?></strong></td>
                     <td><?php echo htmlspecialchars($u['email']); ?></td>
                     <td>
                         <?php if ($u['role'] === 'Officer'): ?>
                             <span class="badge-role">Officer</span>
                             <?php if (!$u['is_approved']) echo " <small>(Pending)</small>"; ?>
-                            <br><small>Dist: <?php echo htmlspecialchars($u['district_name'] ?? 'N/A'); ?></small>
+                            <br><small><?php echo htmlspecialchars($u['district_name'] ?? 'N/A'); ?></small>
                         <?php else: ?>
                             <span class="badge-role">Citizen</span>
-                            <br><small>Dist: <?php echo htmlspecialchars($u['district_name'] ?? 'N/A'); ?></small>
+                            <br><small><?php echo htmlspecialchars($u['district_name'] ?? 'N/A'); ?></small>
                         <?php endif; ?>
                     </td>
                     <td>
@@ -472,7 +577,7 @@ $json_landmarks = json_encode($landmark_data);
         document.getElementById('dutyForm').reset();
         filterLandmarks();
         
-        document.getElementById('btn_save').innerText = "Publish Shift";
+        document.getElementById('btn_save').innerText = "Publish";
         document.getElementById('btn_cancel').style.display = "none";
     }
 </script>

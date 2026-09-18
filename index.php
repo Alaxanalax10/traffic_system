@@ -88,17 +88,17 @@ if (isset($_POST['login'])) {
 </head>
 <body>
     <div class="card">
-        <h2>Sign In</h2>
+        <h2>Login</h2>
         <?php if($msg) echo $msg; ?>
         <form method="POST">
             <input type="email" name="email" placeholder="Email Address" required>
             <input type="password" name="password" placeholder="Password" required>
-            <button type="submit" name="login">Secure Login</button>
+            <button type="submit" name="login">Login</button>
         </form>
     </div>
 
     <div class="card">
-        <h2>System Registration</h2>
+        <h2>Register</h2>
         <form method="POST">
             <select name="account_type" id="account_type" required>
                 <option value="public">Standard Public Account</option>

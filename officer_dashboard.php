@@ -130,8 +130,8 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
 <body>
 
 <div class="navbar">
-    <h2>Officer Terminal: <?php echo htmlspecialchars($_SESSION['user_name']); ?></h2>
-    <a href="logout.php">End Shift</a>
+    <h2>Officer Panel: <?php echo htmlspecialchars($_SESSION['user_name']); ?></h2>
+    <a href="logout.php">Logout</a>
 </div>
 
 <div>
@@ -164,18 +164,17 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
                         <?php endforeach; ?>
                     </select>
                     
-                    <button type="submit" name="issue_ticket">Issue Official Ticket</button>
+                    <button type="submit" name="issue_ticket">Issue Citation</button>
                 </form>
             </div>
 
             <div class="panel">
-                <h3>My Assigned Weekly Duty Roster</h3>
-                <p>Jurisdiction: <strong><?php echo htmlspecialchars($officer_dist); ?> District</strong></p>
+                <h3>My Assigned Weekly Duty</h3>
                 <?php if (empty($schedules)): ?>
                     <p>No upcoming shifts assigned by Admin.</p>
                 <?php else: ?>
                     <table>
-                        <tr><th>Day</th><th>Time Window</th><th>Duty Location</th></tr>
+                        <tr><th>Day</th><th>Time Allocation</th><th>Duty Location</th></tr>
                         <?php foreach($schedules as $shift): ?>
                         <tr>
                             <td><strong><?php echo date('l', strtotime('Sunday +' . (int)$shift['day_of_week'] . ' days')); ?></strong></td>
@@ -198,7 +197,7 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
         <div>
             <!-- ACTIVE POST HAZARDS -->
             <div class="panel">
-                <h3>Active Post Emergencies</h3>
+                <h3>Active My Duty</h3>
                 
                 <?php if ($active_duty): ?>
                     <div style="margin-bottom: 15px; border: 1px solid #cfe0fb; background: #eef4ff; color: #1e3a8a; border-radius: 8px; padding: 8px;">
@@ -236,7 +235,7 @@ $registered_vehicles = $pdo->query("SELECT license_plate, vehicle_model FROM Veh
                     <?php endif; ?>
                 <?php else: ?>
                     <div style="margin-bottom: 15px; border: 1px solid #cbd5e1; background: #f8fafc; color: #475569; border-radius: 8px; padding: 8px;">
-                        <strong>STATUS:</strong> OFF-DUTY / PATROL
+                        <strong>STATUS:</strong> OFF-DUTY
                     </div>
                     <p>You are not currently scheduled at a specific landmark.</p>
                 <?php endif; ?>
